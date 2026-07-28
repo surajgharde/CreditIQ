@@ -1,0 +1,556 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+.analysis-running-page {
+  --primary: #124b46;
+  --primary-hover: #0a332f;
+  --text-dark: #0F172A;
+  --text-gray: #475569;
+  --text-light: #64748B;
+  --text-lighter: #94A3B8;
+  --bg-color: #FAFAFA;
+  --card-bg: #FFFFFF;
+  --border-color: #E2E8F0;
+  
+  --success-bg: #DCFCE7;
+  --success-color: #16A34A;
+  --active-bg: #F1F5F9;
+  --active-color: #124b46;
+  --pending-bg: #F1F5F9;
+  --pending-color: #94A3B8;
+
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--text-dark);
+  background-color: var(--bg-color);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Navbar */
+.analysis-running-page .navbar {
+  background-color: var(--card-bg);
+  border-bottom: 1px solid var(--border-color);
+  padding: 1rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.analysis-running-page .logo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 800;
+  font-size: 1.25rem;
+  color: var(--primary);
+  letter-spacing: -0.02em;
+}
+
+.analysis-running-page .nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.analysis-running-page .icon-button {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  background-color: #F1F5F9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-gray);
+  cursor: pointer;
+}
+
+.analysis-running-page .avatar {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  background-color: #FDE68A; /* slight yellow-orange tint from screenshot */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* Main Content */
+.analysis-running-page .main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 3rem 1.5rem;
+}
+
+/* Two-Column Grid */
+.analysis-running-page .analysis-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 1.5rem;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+@media (max-width: 900px) {
+  .analysis-running-page .analysis-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Tracking Card */
+.analysis-running-page .tracking-card {
+  background: var(--card-bg);
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -2px rgba(0, 0, 0, 0.02);
+  display: flex;
+  flex-direction: column;
+}
+
+.analysis-running-page .tracking-header {
+  padding: 2rem 2.5rem;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.analysis-running-page .header-left h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--primary);
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.01em;
+}
+
+.analysis-running-page .header-left p {
+  font-size: 0.9rem;
+  color: var(--text-light);
+}
+
+.analysis-running-page .header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+  min-width: 150px;
+}
+
+.analysis-running-page .progress-text {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.analysis-running-page .progress-bar-container {
+  width: 100%;
+  height: 6px;
+  background-color: var(--border-color);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.analysis-running-page .progress-bar-fill {
+  height: 100%;
+  background-color: var(--primary);
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+/* Error Banner */
+.analysis-running-page .error-banner {
+  margin: 1rem 2.5rem 0;
+  padding: 12px 16px;
+  background-color: #FEF2F2;
+  border-left: 4px solid #DC2626;
+  color: #B91C1C;
+  border-radius: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.analysis-running-page .retry-btn {
+  background-color: #DC2626;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.analysis-running-page .retry-btn:hover {
+  background-color: #B91C1C;
+}
+
+/* Stepper */
+.analysis-running-page .tracking-body {
+  padding: 2.5rem;
+}
+
+.analysis-running-page .stepper {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+}
+
+.analysis-running-page .stepper::before {
+  content: '';
+  position: absolute;
+  left: 17px;
+  top: 17px;
+  bottom: 30px;
+  width: 1px;
+  background-color: var(--border-color);
+  z-index: 0;
+}
+
+.analysis-running-page .step {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+  position: relative;
+  z-index: 1;
+  padding-bottom: 2rem;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.analysis-running-page .step:hover {
+  opacity: 0.85;
+}
+
+.analysis-running-page .step:last-child {
+  padding-bottom: 0;
+}
+
+.analysis-running-page .step-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background-color: white;
+  position: relative;
+  z-index: 2;
+}
+
+/* Step States */
+.analysis-running-page .step.success .step-icon-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background-color: var(--success-bg);
+  color: var(--success-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--success-color);
+}
+
+.analysis-running-page .step.active .step-icon-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background-color: var(--primary);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 4px rgba(18, 75, 70, 0.15);
+}
+
+.analysis-running-page .pulse {
+  animation: pulse-glow 2s infinite;
+}
+
+@keyframes pulse-glow {
+  0% { box-shadow: 0 0 0 0 rgba(18, 75, 70, 0.3); }
+  70% { box-shadow: 0 0 0 8px rgba(18, 75, 70, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(18, 75, 70, 0); }
+}
+
+.analysis-running-page .spinner {
+  animation: spin 1.5s linear infinite;
+}
+
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
+
+.analysis-running-page .step.pending .step-icon-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background-color: var(--bg-color);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.analysis-running-page .step.pending .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #CBD5E1;
+}
+
+.analysis-running-page .step-content {
+  padding-top: 0.35rem;
+  flex: 1;
+}
+
+.analysis-running-page .step-title {
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: 0.35rem;
+  transition: color 0.3s;
+}
+
+.analysis-running-page .step.success .step-title { color: #000000; }
+.analysis-running-page .step.active .step-title { color: var(--primary); font-weight: 700; }
+.analysis-running-page .step.pending .step-title { color: var(--text-light); }
+
+.analysis-running-page .step-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-light);
+  line-height: 1.4;
+}
+
+.analysis-running-page .step.pending .step-subtitle {
+  color: var(--text-lighter);
+}
+
+.analysis-running-page .step-detail-card {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #334155;
+  animation: slideFade 0.2s ease-out;
+}
+
+@keyframes slideFade {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.analysis-running-page .step-detail-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 0.5rem;
+}
+
+.analysis-running-page .step-detail-status {
+  font-weight: 600;
+  color: #16A34A;
+}
+
+.analysis-running-page .step-detail-status.loading {
+  color: #D97706;
+}
+
+/* Completion Card */
+.analysis-running-page .completion-card {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background-color: #F0FDF4;
+  border: 1px solid #BBF7D0;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  animation: slideFade 0.4s ease-out;
+}
+
+.analysis-running-page .completion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.analysis-running-page .completion-header h2 {
+  color: #16A34A;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.analysis-running-page .completion-decision {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: white;
+}
+
+.analysis-running-page .completion-decision.approve { background-color: #16A34A; }
+.analysis-running-page .completion-decision.reject { background-color: #DC2626; }
+.analysis-running-page .completion-decision.conditional { background-color: #D97706; }
+
+.analysis-running-page .btn-view-report {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.75rem 1.5rem;
+  background-color: #0d3b38;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.analysis-running-page .btn-view-report:hover {
+  background-color: #0a332f;
+}
+
+/* Intelligence Panel Sidebar */
+.analysis-running-page .intelligence-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.analysis-running-page .panel-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  padding: 1.25rem;
+}
+
+.analysis-running-page .panel-card h3 {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 1rem;
+}
+
+.analysis-running-page .eta-display {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.analysis-running-page .eta-label {
+  font-size: 0.75rem;
+  color: var(--text-light);
+  margin-top: 4px;
+}
+
+.analysis-running-page .insight-card {
+  background: linear-gradient(135deg, #0d3b38, #14564f);
+  color: white;
+  border: none;
+}
+
+.analysis-running-page .insight-card h3 {
+  color: #5eead4;
+}
+
+.analysis-running-page .insight-text {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Terminal Card */
+.analysis-running-page .terminal-card {
+  background: #020617;
+  border-radius: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  height: 380px;
+  overflow: hidden;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+.analysis-running-page .terminal-header {
+  background: #0F172A;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #1E293B;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #94A3B8;
+  font-size: 0.75rem;
+  font-family: inherit;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.analysis-running-page .terminal-body {
+  flex: 1;
+  padding: 1rem;
+  overflow-y: auto;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Custom Scrollbar for terminal */
+.analysis-running-page .terminal-body::-webkit-scrollbar {
+  width: 6px;
+}
+.analysis-running-page .terminal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+.analysis-running-page .terminal-body::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+
+.analysis-running-page .terminal-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  line-height: 1.4;
+}
+
+.analysis-running-page .term-time {
+  color: #64748B;
+  flex-shrink: 0;
+}
+
+.analysis-running-page .term-msg {
+  color: #10B981;
+  word-break: break-word;
+}
+
+.analysis-running-page .blinking-cursor {
+  color: #10B981;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}

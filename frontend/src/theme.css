@@ -1,0 +1,159 @@
+/* ============================================================
+   CreditIQ — Modern Theme Layer  (2026 refresh)
+   Clean modern light + Emerald/Teal accent.
+   This file only re-skins the UI. No markup / class names
+   were changed, so all functionality is untouched.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+:root {
+  /* Brand — teal / emerald */
+  --iq-brand-50:  #f0fdfa;
+  --iq-brand-100: #ccfbf1;
+  --iq-brand-200: #99f6e4;
+  --iq-brand-300: #5eead4;
+  --iq-brand-400: #2dd4bf;
+  --iq-brand-500: #14b8a6;
+  --iq-brand-600: #0d9488;
+  --iq-brand-700: #0f766e;
+  --iq-brand-800: #115e59;
+  --iq-brand-900: #134e4a;
+  --iq-brand-ink: #0d3b38;
+
+  /* Neutrals / surfaces */
+  --iq-bg:       #f4f8f7;
+  --iq-surface:  #ffffff;
+  --iq-ink:      #0d1b1a;
+
+  /* Type */
+  --iq-font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --iq-font-body:    'Inter', system-ui, -apple-system, sans-serif;
+
+  /* Motion */
+  --iq-ease: cubic-bezier(.4, 0, .2, 1);
+}
+
+/* ---- Base ------------------------------------------------- */
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--iq-font-body);
+  background: var(--iq-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Modern display type for headings & key numbers */
+h1, h2, h3, h4, h5,
+[class*="__title"],
+[class*="__value"],
+[class*="__price"],
+[class*="hero__"],
+[class*="-title"] {
+  font-family: var(--iq-font-display);
+  letter-spacing: -0.02em;
+}
+
+/* ---- Micro-interactions ---------------------------------- */
+button,
+a[class*="btn"],
+[class*="creditiq-btn"],
+[class*="nav-btn"] {
+  transition: transform .18s var(--iq-ease),
+              box-shadow .18s var(--iq-ease),
+              background-color .18s var(--iq-ease),
+              border-color .18s var(--iq-ease),
+              color .18s var(--iq-ease),
+              opacity .18s var(--iq-ease);
+}
+
+/* Accessible teal focus ring across the app */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--iq-brand-500);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* ---- Selection & scrollbar ------------------------------- */
+::selection {
+  background: rgba(20, 184, 166, 0.20);
+  color: var(--iq-brand-ink);
+}
+
+* { scrollbar-width: thin; scrollbar-color: var(--iq-brand-400) transparent; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--iq-brand-400), var(--iq-brand-600));
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--iq-brand-500), var(--iq-brand-700));
+  background-clip: padding-box;
+}
+
+/* ============================================================
+   Component polish — modern elevation, focus & motion.
+   Shadow / border only (never transform) so we don't fight
+   framer-motion inline transforms. No markup changes.
+   ============================================================ */
+
+/* Cards: refined shadow + teal-tinted lift on hover */
+.creditiq-feature-card,
+.creditiq-stat-card,
+.creditiq-pricing-card,
+.creditiq-research-card,
+.creditiq-workflow-card,
+.creditiq-chart-card,
+.creditiq-dash-card {
+  transition: box-shadow .24s var(--iq-ease), border-color .24s var(--iq-ease);
+}
+.creditiq-feature-card:hover,
+.creditiq-stat-card:hover,
+.creditiq-pricing-card:hover,
+.creditiq-research-card:hover,
+.creditiq-workflow-card:hover,
+.creditiq-chart-card:hover,
+.creditiq-dash-card:hover {
+  box-shadow: 0 18px 44px -18px rgba(13, 59, 56, 0.30),
+              0 4px 14px -8px rgba(13, 59, 56, 0.16);
+  border-color: rgba(20, 184, 166, 0.45);
+}
+
+/* Primary buttons: soft teal glow on hover */
+.creditiq-btn--primary:hover,
+button[class*="--primary"]:hover {
+  box-shadow: 0 10px 26px -8px rgba(13, 148, 136, 0.55);
+}
+
+/* Inputs: consistent, modern teal focus ring everywhere */
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--iq-brand-500) !important;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.16) !important;
+  outline: none;
+}
+
+/* Links inherit the brand hue on interaction */
+a:not([class]):hover { color: var(--iq-brand-600); }
+
+/* ---- Reduced motion: respect user preference ------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

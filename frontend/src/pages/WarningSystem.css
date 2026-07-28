@@ -1,0 +1,326 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  --primary: #0F172A;
+  --bg-main: #F1F5F9;
+  --card-bg: rgba(255, 255, 255, 0.9);
+  --glass-border: rgba(255, 255, 255, 0.4);
+  --text-main: #1E293B;
+  --text-muted: #64748B;
+  --accent: #0d9488;
+  --danger: #EF4444;
+  --warning: #F59E0B;
+  --success: #10B981;
+}
+
+/* ─── Page Shell ─────────────────────────────────────── */
+.warning-page {
+  font-family: 'Outfit', sans-serif;
+  background: radial-gradient(circle at top left, #F8FAFC 0%, #E2E8F0 100%);
+  min-height: 100vh;
+  color: var(--text-main);
+  padding-bottom: 5rem;
+}
+
+/* ─── Navbar ─────────────────────────────────────────── */
+.warning-navbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2.5rem;
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 4px 15px -1px rgba(0, 0, 0, 0.05);
+}
+
+.warning-logo {
+  font-weight: 800;
+  font-size: 1.5rem;
+  color: var(--primary);
+  text-decoration: none;
+  letter-spacing: -0.04em;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.warning-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+}
+
+/* ─── Animations ──────────────────────────────────────── */
+@keyframes pulse-green {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+  }
+
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes flash-border {
+  0% {
+    box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.6);
+  }
+
+  60% {
+    box-shadow: 0 0 0 10px rgba(20, 184, 166, 0);
+  }
+
+  100% {
+    box-shadow: none;
+  }
+}
+
+/* Bar grows upward from 0 with elastic bounce */
+@keyframes bar-entry {
+  0% {
+    transform: scaleY(0);
+    opacity: 0;
+  }
+
+  65% {
+    transform: scaleY(1.06);
+  }
+
+  82% {
+    transform: scaleY(0.97);
+  }
+
+  100% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+
+/* ─── Main Container ──────────────────────────────────── */
+.warning-container {
+  max-width: 1200px;
+  margin: 3rem auto;
+  padding: 0 2rem;
+}
+
+.warning-subtitle {
+  font-size: 1.05rem;
+  color: var(--text-muted);
+  margin-bottom: 3rem;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+/* ─── Trajectory Card ─────────────────────────────────── */
+.trajectory-card {
+  background: var(--card-bg);
+  backdrop-filter: blur(10px);
+  border-radius: 2rem;
+  border: 1px solid rgba(226, 232, 240, 0.7);
+  padding: 2.5rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.08);
+  margin-bottom: 3rem;
+}
+
+/* ── The chart wrapper – fixed pixel height so bars have room ── */
+.trajectory-chart {
+  position: relative;
+  /* anchor for threshold line */
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  /* bars grow from the bottom */
+  justify-content: space-between;
+  height: 260px;
+  margin-top: 2rem;
+  padding-bottom: 0;
+  border-bottom: 3px solid #E2E8F0;
+  gap: 8px;
+}
+
+/* Each column: month label + bar stacked */
+.trajectory-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+}
+
+/* Wrapper fills the bar zone (above the text labels) */
+.trajectory-bar-wrapper {
+  width: 100%;
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  /* bar grows upward from bottom */
+  justify-content: center;
+  position: relative;
+}
+
+/* The coloured bar itself */
+.trajectory-bar {
+  width: 65%;
+  max-width: 48px;
+  border-radius: 6px 6px 0 0;
+  transition: height 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+  display: flex;
+  justify-content: center;
+  cursor: pointer;
+  transform-origin: bottom center;
+  animation: bar-entry 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+
+.trajectory-bar:hover {
+  filter: brightness(1.12);
+  transform: scaleX(1.08);
+  transform-origin: bottom center;
+}
+
+.bar-predicted {
+  opacity: 0.55;
+}
+
+.alert-label {
+  position: absolute;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--danger);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* ─── Alerts Section ──────────────────────────────────── */
+.alerts-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-bottom: 4rem;
+}
+
+.alert-card {
+  background: white;
+  border-radius: 1.5rem;
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  padding: 1.5rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.04);
+  transition: transform 0.2s;
+}
+
+.alert-card:hover {
+  transform: translateX(8px);
+}
+
+.alert-active {
+  border-left: 8px solid var(--danger);
+}
+
+.alert-acknowledged {
+  border-left: 8px solid var(--success);
+  opacity: 0.8;
+}
+
+/* ─── Signal Grid ─────────────────────────────────────── */
+.signals-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.75rem;
+}
+
+.signal-card {
+  background: white;
+  border-radius: 1.5rem;
+  padding: 2rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.03);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #F1F5F9;
+  transition: box-shadow 0.3s, transform 0.2s;
+}
+
+.signal-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px -6px rgba(0, 0, 0, 0.08);
+}
+
+.signal-card-name {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--primary);
+  margin-bottom: 0.5rem;
+}
+
+.signal-score {
+  font-size: 2.5rem;
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.signal-detail {
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+/* ─── Summary Banner ──────────────────────────────────── */
+.summary-banner {
+  margin-top: 4rem;
+  padding: 2rem;
+  border-radius: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05);
+}
+
+/* ─── Button ──────────────────────────────────────────── */
+.btn-action {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border-radius: 1rem;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-action:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.12);
+}

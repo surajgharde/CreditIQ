@@ -1,0 +1,108 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+
+* {
+  box-sizing: border-box;
+}
+
+/* ─── Page ───────────────────────────────────────────────── */
+.cam-page {
+  font-family: 'Outfit', sans-serif;
+  background: linear-gradient(160deg, #F8FAFC 0%, #f0fdfa 50%, #F0FDF4 100%);
+  min-height: 100vh;
+  color: #1E293B;
+  padding-bottom: 5rem;
+}
+
+/* ─── Navbar ──────────────────────────────────────────────── */
+.cam-navbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2.5rem;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.7);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+}
+
+.cam-logo {
+  font-weight: 900;
+  font-size: 1.35rem;
+  color: #0d3b38;
+  text-decoration: none;
+  letter-spacing: -0.04em;
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* ─── Container ───────────────────────────────────────────── */
+.cam-container {
+  max-width: 1200px;
+  margin: 2.5rem auto;
+  padding: 0 2rem;
+}
+
+/* ─── Animations ──────────────────────────────────────────── */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes progress-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(20, 184, 166, 0.4);
+  }
+
+  70% {
+    box-shadow: 0 0 0 6px rgba(20, 184, 166, 0);
+  }
+
+  100% {
+    box-shadow: none;
+  }
+}
+
+/* ── Textarea hover/focus state ─ */
+textarea:focus {
+  outline: none;
+  border-color: #14b8a6 !important;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
+}
+
+/* ─── Spinner utility ─────────────────────────────────────── */
+.spinner {
+  animation: spin 1s linear infinite;
+}
