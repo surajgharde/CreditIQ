@@ -43,7 +43,6 @@ npm install
 npm start
 
 cd backend
-python start_backend.p
 # pip install -r requirements.txt
 uvicorn main:app --reload
 
