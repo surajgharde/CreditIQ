@@ -3,8 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   FileText, AlertTriangle, BarChart3,
-  BookOpen, CheckCircle, Star,
-  Users, Building2, Clock, Shield, Zap, TrendingUp
+  BookOpen, Shield, Zap, TrendingUp
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
@@ -16,8 +15,6 @@ const NAV_ITEMS = [
   { id: 'product', label: 'Product' },
   { id: 'features', label: 'Features' },
   { id: 'research', label: 'Research' },
-  { id: 'pricing', label: 'Pricing' },
-  { id: 'history-section', label: 'History' },
 ];
 
 const fadeUp = (delay = 0): any => ({
@@ -212,158 +209,6 @@ function Home() {
                 </motion.div>
               ))}
             </motion.div>
-          </div>
-        </section>
-
-        {/* ─── PRICING ────────────────────────────────────────────── */}
-        <section id="pricing" className="creditiq-section creditiq-section--alt">
-          <div className="creditiq-container">
-            <motion.div
-              className="creditiq-section__header"
-              variants={fadeUp(0)}
-              initial="hidden"
-              whileInView="visible"
-              viewport={{ once: true, margin: '-80px' }}
-            >
-              <div className="creditiq-section__label">PRICING</div>
-              <h2 className="creditiq-section__title">Simple, Transparent Pricing</h2>
-              <p className="creditiq-section__subtitle">Choose the plan that fits your lending institution.</p>
-            </motion.div>
-
-            <motion.div
-              className="creditiq-pricing-grid"
-              variants={stagger}
-              initial="hidden"
-              whileInView="visible"
-              viewport={{ once: true, margin: '-60px' }}
-            >
-              {[
-                {
-                  name: 'Starter', price: '₹19,999', period: '/month',
-                  desc: 'Ideal for NBFCs and MFIs embarking on their AI credit journey.',
-                  features: ['50 analyses / month', 'Document OCR Engine', 'Basic Fraud Detection', 'SHAP Risk Score', 'Email Support'],
-                  cta: 'Get Started', highlight: false,
-                },
-                {
-                  name: 'Professional', price: '₹89,999', period: '/month',
-                  desc: 'Comprehensive solution for mid-sized banks and lending institutions.',
-                  features: ['250 analyses / month', 'Full Fraud Suite (GST + MCA + Circular)', 'News Intelligence Agent', 'AI CAM Generation', 'Early Warning System', 'Priority Support'],
-                  cta: 'Start Free Trial', highlight: true,
-                },
-                {
-                  name: 'Enterprise', price: 'Custom', period: '',
-                  desc: 'Scalable infrastructure for large banks and financial conglomerates.',
-                  features: ['Unlimited analyses', 'On-premise deployment', 'Custom model training', 'API integration', 'Dedicated SLA', 'White-label option'],
-                  cta: 'Contact Sales', highlight: false,
-                },
-              ].map(({ name, price, period, desc, features, cta, highlight }) => (
-                <motion.div
-                  key={name}
-                  className={`creditiq-pricing-card${highlight ? ' creditiq-pricing-card--highlight' : ''}`}
-                  variants={cardReveal}
-                  whileHover={{ y: -8 }}
-                  transition={{ type: 'spring', stiffness: 280, damping: 22 }}
-                >
-                  {highlight && (
-                    <div className="creditiq-pricing-card__badge">
-                      <Star size={11} /> Most Popular
-                    </div>
-                  )}
-                  <div className="creditiq-pricing-card__name">{name}</div>
-                  <div className="creditiq-pricing-card__price">
-                    {price}<span className="creditiq-pricing-card__period">{period}</span>
-                  </div>
-                  <p className="creditiq-pricing-card__desc">{desc}</p>
-                  <ul className="creditiq-pricing-card__features">
-                    {features.map(f => (
-                      <li key={f}><CheckCircle size={15} /> {f}</li>
-                    ))}
-                  </ul>
-                  <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-                    <Link
-                      to="/login"
-                      className={`creditiq-btn creditiq-pricing-card__cta creditiq-btn--primary`}
-                    >
-                      {cta}
-                    </Link>
-                  </motion.div>
-                </motion.div>
-              ))}
-            </motion.div>
-          </div>
-        </section>
-
-        {/* ─── HISTORY ────────────────────────────────────────────── */}
-        <section id="history-section" className="creditiq-section">
-          <div className="creditiq-container">
-            <motion.div
-              className="creditiq-section__header"
-              variants={fadeUp(0)}
-              initial="hidden"
-              whileInView="visible"
-              viewport={{ once: true, margin: '-80px' }}
-            >
-              <div className="creditiq-section__label">HISTORY</div>
-              <h2 className="creditiq-section__title">Platform Activity & Milestones</h2>
-              <p className="creditiq-section__subtitle">
-                A glimpse of CreditIQ's growing impact across Indian lending institutions.
-              </p>
-            </motion.div>
-
-            <div className="creditiq-history-grid">
-              {/* Stats panel */}
-              <motion.div
-                className="creditiq-history-stats"
-                variants={stagger}
-                initial="hidden"
-                whileInView="visible"
-                viewport={{ once: true, margin: '-60px' }}
-              >
-                {[
-                  { icon: <Users size={22} />, value: '120+', label: 'Financial Institutions' },
-                  { icon: <Building2 size={22} />, value: '8,400+', label: 'Companies Analysed' },
-                  { icon: <Clock size={22} />, value: '₹2,300 Cr+', label: 'Credit Assessed' },
-                  { icon: <Shield size={22} />, value: '94.2%', label: 'Fraud Detection Rate' },
-                ].map(({ icon, value, label }) => (
-                  <motion.div key={label} className="creditiq-history-stat" variants={cardReveal}>
-                    <div className="creditiq-history-stat__icon">{icon}</div>
-                    <div>
-                      <div className="creditiq-history-stat__value">{value}</div>
-                      <div className="creditiq-history-stat__label">{label}</div>
-                    </div>
-                  </motion.div>
-                ))}
-              </motion.div>
-
-              {/* Timeline */}
-              <motion.div
-                className="creditiq-timeline"
-                variants={stagger}
-                initial="hidden"
-                whileInView="visible"
-                viewport={{ once: true, margin: '-60px' }}
-              >
-                {[
-                  { date: 'Mar 2026', event: 'CreditIQ v2.0 — Cohere CAM Generation launched', type: 'major' },
-                  { date: 'Feb 2026', event: 'Early Warning System (EWS) with real-time alerts deployed', type: 'major' },
-                  { date: 'Jan 2026', event: 'FinBERT News Intelligence integrated, covering 24 sources', type: 'minor' },
-                  { date: 'Dec 2025', event: 'XGBoost model fine-tuned on 50,000 Indian SME cases (AUC 0.91)', type: 'minor' },
-                  { date: 'Oct 2025', event: 'CreditIQ v1.0 launched — Document OCR + Risk Scoring', type: 'major' },
-                ].map(({ date, event, type }) => (
-                  <motion.div
-                    key={event}
-                    className={`creditiq-timeline__item${type === 'major' ? ' creditiq-timeline__item--major' : ''}`}
-                    variants={cardReveal}
-                  >
-                    <div className="creditiq-timeline__dot" />
-                    <div className="creditiq-timeline__content">
-                      <span className="creditiq-timeline__date">{date}</span>
-                      <span className="creditiq-timeline__event">{event}</span>
-                    </div>
-                  </motion.div>
-                ))}
-              </motion.div>
-            </div>
           </div>
         </section>
 
