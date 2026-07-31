@@ -6,6 +6,7 @@ from schemas.auth import UserCreate, UserLogin, UserResponse, Token
 from utils.auth import get_password_hash, verify_password, create_access_token
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Optional
+from datetime import datetime, timezone
 import jwt
 from config import config
 
@@ -53,10 +54,14 @@ def get_me(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     
 
     if email == "admin@gmail.com":
+        # Synthetic record — the prototype admin has no row in `users`.
+        # Must satisfy every UserResponse field or FastAPI raises a 500.
         return {
             "email": "admin@gmail.com",
             "full_name": "System Administrator",
-            "id": 0
+            "id": 0,
+            "is_active": True,
+            "created_at": datetime.now(timezone.utc)
         }
     
     user = db.query(User).filter(User.email == email).first()

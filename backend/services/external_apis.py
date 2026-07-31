@@ -231,8 +231,12 @@ try:
     sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
     chroma_collection = chroma_client.get_or_create_collection(name="creditiq_knowledge", embedding_function=sentence_transformer_ef)
     CHROMA_CONNECTED = True
-except Exception as e:
+except BaseException as e:
+    # BaseException, not Exception: chromadb's Rust bindings raise
+    # pyo3_runtime.PanicException (a BaseException) on a version/schema
+    # mismatch, which would otherwise abort the whole app import.
     logger.warning(f"ChromaDB init failed: {e}")
+    chroma_client = None
     chroma_collection = None
     CHROMA_CONNECTED = False
 

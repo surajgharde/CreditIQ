@@ -39,6 +39,7 @@ pytesseract
 sendgrid
 shap
 transformers
+tf-keras
 twilio
 word2number
 xgboost

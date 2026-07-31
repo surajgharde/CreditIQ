@@ -58,6 +58,10 @@ try:
     from sqlalchemy.orm import Session
     from utils.demo_data import load_demo_data, reset_demo_data
 
+    # Registers every model on Base.metadata — without this, create_all() only
+    # creates the tables whose modules happen to have been imported already.
+    import models  # noqa: F401
+
     print("Creating tables...")
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()

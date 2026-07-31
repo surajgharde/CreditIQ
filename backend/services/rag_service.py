@@ -62,7 +62,8 @@ try:
     _chroma_client = chromadb.Client()
     _ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
     collection = _chroma_client.get_or_create_collection("creditiq_news_intelligence", embedding_function=_ef)
-except Exception as _ch_err:
+except BaseException as _ch_err:
+    # BaseException: chromadb's Rust bindings can raise pyo3_runtime.PanicException.
     logger.warning(f"ChromaDB unavailable in rag_service: {_ch_err}")
     collection = None
 
