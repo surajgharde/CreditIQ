@@ -1,11 +1,8 @@
-import json
-import os
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from database import get_db
 from models.analysis import Analysis
 from models.company import Company
-from models.fraud import FraudSignal
 
 router = APIRouter()
 

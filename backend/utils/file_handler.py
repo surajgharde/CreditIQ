@@ -23,7 +23,6 @@ def validate_pdf(file: UploadFile) -> bool:
     return True
 
 def generate_unique_filename(original_filename: str) -> str:
-    ext = os.path.splitext(original_filename)[1]
     unique_id = str(uuid.uuid4())
     return f"{unique_id}_{original_filename}"
 

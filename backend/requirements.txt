@@ -1,7 +1,7 @@
 fastapi
 uvicorn[standard]
 sqlalchemy
-psycopg2-binary
+psycopg2-binary  # runtime driver when DATABASE_URL points at Postgres
 requests
 python-multipart
 python-dotenv
@@ -16,7 +16,6 @@ pydantic-settings
 boto3
 aiohttp
 anthropic
-apscheduler
 bcrypt
 beautifulsoup4
 cohere
@@ -39,7 +38,7 @@ pytesseract
 sendgrid
 shap
 transformers
-tf-keras
+tf-keras  # transformers loads FinBERT via the TF backend at runtime
 twilio
 word2number
 xgboost

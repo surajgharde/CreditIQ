@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import text
-from database import engine, SessionLocal
+from database import SessionLocal
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

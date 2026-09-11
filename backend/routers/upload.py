@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Form, File, UploadFile, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 from database import get_db
 from models.company import Company
 from models.analysis import Analysis

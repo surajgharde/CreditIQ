@@ -1,3 +1,4 @@
+import json
 import os
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -41,8 +42,6 @@ def get_analysis_results(analysis_id: int, db: Session = Depends(get_db)):
             "source": sig.source
         })
 
-    import json
-    import os
     dashboard_data = {}
     json_path = f"data/results_{analysis.id}.json"
     if os.path.exists(json_path):
@@ -85,7 +84,7 @@ def get_analysis_results(analysis_id: int, db: Session = Depends(get_db)):
             "decision_reasoning": "Analysis generated via automated ML pipeline.",
             "conditions": [],
             "loan_tenure": 3,
-            "interest_rate_breakdown": f"Base Rate + Risk Premium"
+            "interest_rate_breakdown": "Base Rate + Risk Premium"
         })
     }
 
@@ -111,7 +110,6 @@ def get_shap_chart(analysis_id: int, db: Session = Depends(get_db)):
         
     # Safely resolve the physical disk path from the logical relative URL format.
     # The scoring_service stores it as "/graphs/<uuid>.png"
-    import os
     clean_path = chart_path.lstrip('/') if chart_path.startswith('/') else chart_path
     physical_disk_path = os.path.join(os.getcwd(), clean_path)
     

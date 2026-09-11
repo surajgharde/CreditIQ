@@ -5,7 +5,6 @@ import {
   FileText, AlertTriangle, BarChart3,
   BookOpen, Shield, Zap, TrendingUp
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
 import HeroSection from '../components/HeroSection';
 import FeatureCards from '../components/FeatureCards';
@@ -33,7 +32,6 @@ const cardReveal: any = {
 };
 
 function Home() {
-  const { user } = useAuth();
   const [activeSection, setActiveSection] = useState('');
 
   useEffect(() => {

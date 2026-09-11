@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.analysis import Analysis
 from models.company import Company
-from models.fraud import FraudSignal
 from services import cam_service
 from routers.ws import manager
 
@@ -218,9 +217,8 @@ def preview_cam(analysis_id: int, db: Session = Depends(get_db)):
         with open(results_file, "r") as f:
             results_data = json.load(f)
             
-    decision_info = results_data.get("recommendation", {})
     shap_info = results_data.get("shap", {})
-    
+
     pd_val = shap_info.get("final_pd", analysis.probability_of_default)
     fraud_val = fraud_data.get("fraud_risk_level", "LOW")
 

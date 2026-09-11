@@ -46,22 +46,16 @@ def build_fast_payload(company_id: int) -> dict:
 
         # ── Load local JSON files ──────────────────────────
         fraud_data: dict = {}
-        results_data: dict = {}
         if analysis:
             ffile = f"data/fraud_{analysis.id}.json"
-            rfile = f"data/results_{analysis.id}.json"
             if os.path.exists(ffile):
                 with open(ffile) as f:
                     fraud_data = json.load(f)
-            if os.path.exists(rfile):
-                with open(rfile) as f:
-                    results_data = json.load(f)
 
         baseline_pd = float(analysis.probability_of_default) if analysis else 15.0
         news_score  = float(analysis.news_risk_score) if analysis else 0.0
 
         fraud_signals = fraud_data.get("signals", [])
-        news_signals  = results_data.get("news_signals", []) if isinstance(results_data, dict) else []
 
         # ── Build Signals (with small initial noise to show movement) ────────
         def _rl(score: float) -> str:
@@ -86,7 +80,7 @@ def build_fast_payload(company_id: int) -> dict:
             {"signal_name": "GST Filing Status",     "score": round(gst_score,  1), "risk_level": _rl(gst_score),  "detail": gst_sig.get("description",  "Clean GST filings confirmed; processing GSTR-3B trends."), "source": "GSTN API [Doc]",     "last_updated": datetime.now().isoformat()},
             {"signal_name": "Bank / Circular Flow",  "score": round(circ_score, 1), "risk_level": _rl(circ_score), "detail": circ_sig.get("description", "No major circular trading detected in current batch."),    "source": "Bank Stmt [NLP]",    "last_updated": datetime.now().isoformat()},
             {"signal_name": "Promoter Default Risk", "score": round(mca_score,  1), "risk_level": _rl(mca_score),  "detail": mca_sig.get("description",  "Director history active; checking cross-directorships."),   "source": "MCA21 Database",     "last_updated": datetime.now().isoformat()},
-            {"signal_name": "News Sentiment",        "score": round(n_score,    1), "risk_level": _rl(n_score),   "detail": f"Sentiment analysis active. Scanning regional and financial news portals.",       "source": "FinBERT + Scraper",  "last_updated": datetime.now().isoformat()},
+            {"signal_name": "News Sentiment",        "score": round(n_score,    1), "risk_level": _rl(n_score),   "detail": "Sentiment analysis active. Scanning regional and financial news portals.",       "source": "FinBERT + Scraper",  "last_updated": datetime.now().isoformat()},
             {"signal_name": "EMI Repayment",         "score": 5.4,                  "risk_level": "GOOD",          "detail": "No overdue EMI; checking standard repayment variance.",                             "source": "Loan Ledger [DB]",   "last_updated": datetime.now().isoformat()},
             {"signal_name": "Court / Litigation",    "score": 19.8,                 "risk_level": "GOOD",          "detail": "Scanning e-Courts and NCLT notices for name matches.",                             "source": "Google News RSS",    "last_updated": datetime.now().isoformat()},
         ]

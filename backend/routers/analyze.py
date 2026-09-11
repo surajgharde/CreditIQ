@@ -217,7 +217,6 @@ async def run_analysis_background(analysis_id: int):
         await ws_push(analysis_id, 6, "Claude AI CAM Generation", "CAM parameters synced successfully", 100, "completed")
 
     except Exception as e:
-        import traceback
         # Capture full repr(e) for better debugging
         err_report = repr(e)
         

@@ -324,7 +324,7 @@ def _generate_fallback_articles(company_name: str) -> List[Dict[str, Any]]:
         ("Q3 Results missed street estimates, margins under pressure",
          f"Financial performance for {company_name} showed slight EBITDA deterioration."),
         (f"{company_name} wins large PSU contract — analyst upgrade",
-         f"Strong forward guidance issued; revenue target revised upward."),
+         "Strong forward guidance issued; revenue target revised upward."),
         (f"CFO exits {company_name} amid internal restructuring",
          "Top-level management changes bring interim uncertainty to operations."),
         (f"{company_name} receives minor environmental notice from CPCB",

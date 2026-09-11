@@ -2,7 +2,7 @@ import os
 import json
 import time
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Any, List, Optional
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from datetime import datetime
@@ -108,10 +108,8 @@ def get_gstr_3b(gstin: str, return_period: str) -> dict:
         return {"error": f"GSTN 3B Source Failed: {str(e)}"}
 
 def get_filing_history(gstin: str) -> list:
-    global API_FAILURES
-    
     if API_FAILURES["GSTN"] >= 3:
-        logger.error(f"CIRCUIT BREAKER OPEN: GSTN API failed 3 consecutive times. Falling back to Uploaded PDF Data.")
+        logger.error("CIRCUIT BREAKER OPEN: GSTN API failed 3 consecutive times. Falling back to Uploaded PDF Data.")
         return [{"error": "CIRCUIT_BREAKER_OPEN"}]
         
     cache_key = f"gstn_history_{gstin}"
@@ -158,10 +156,8 @@ def get_company_details(cin: str) -> dict:
         return {"error": f"MCA Company Data Source Failed: {str(e)}"}
 
 def get_director_details(din: str) -> dict:
-    global API_FAILURES
-    
     if API_FAILURES["MCA"] >= 3:
-        logger.error(f"CIRCUIT BREAKER OPEN: MCA API failed 3 consecutive times.")
+        logger.error("CIRCUIT BREAKER OPEN: MCA API failed 3 consecutive times.")
         return {"error": "CIRCUIT_BREAKER_OPEN: MCA API sources are currently unresponsive."}
         
     try:
@@ -222,7 +218,6 @@ def analyze_document(file_path: str) -> dict:
 # ==========================================
 try:
     import chromadb
-    from chromadb.config import Settings
     from chromadb.utils import embedding_functions
     CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.join(os.getcwd(), "chroma_db"))
     os.makedirs(CHROMA_DB_PATH, exist_ok=True)
@@ -329,7 +324,7 @@ except Exception:
 
 def send_sms_alert(phone: str, message: str) -> bool:
     if not twilio_client:
-        logger.error(f"Twilio Credentials Missing. SMS Source Failed.")
+        logger.error("Twilio Credentials Missing. SMS Source Failed.")
         return False
     try:
         # Include status_callback for delivery receipts

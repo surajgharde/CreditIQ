@@ -3,22 +3,6 @@ from models.company import Company
 from models.analysis import Analysis
 from models.fraud import FraudSignal
 from models.ews import EWSSignal
-from datetime import datetime
-
-def reset_demo_data(db: Session):
-    # Wipe the specific ABC demo company and its data to a clean slate
-    company = db.query(Company).filter(Company.cin_number == "U28990MH2015PTC123456").first()
-    if company:
-        analysis = db.query(Analysis).filter(Analysis.company_id == company.id).first()
-        if analysis:
-            db.query(FraudSignal).filter(FraudSignal.analysis_id == analysis.id).delete()
-            db.delete(analysis)
-        db.query(EWSSignal).filter(EWSSignal.company_id == company.id).delete()
-        db.delete(company)
-        db.commit()
-    
-    # Reload fresh
-    load_demo_data(db)
 
 def load_demo_data(db: Session):
     existing = db.query(Company).filter(Company.cin_number == "U28990MH2015PTC123456").first()

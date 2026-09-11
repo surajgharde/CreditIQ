@@ -42,7 +42,7 @@ async def websocket_endpoint(websocket: WebSocket, analysis_id: str):
     try:
         while True:
             # Structurally maintains open pipe expecting pingbacks or idle closure
-            data = await websocket.receive_text()
+            await websocket.receive_text()
             # We don't necessarily do anything with incoming socket texts 
             # (UI is mainly a receiver listening for python execution streams)
     except WebSocketDisconnect:

@@ -1,5 +1,3 @@
-import os
-import requests
 import networkx as nx
 from typing import Dict, Any, List
 
@@ -12,7 +10,6 @@ def analyze_gst_mismatches(gstin: str, uploaded_gst_data: List[Dict[str, float]]
     total_2a_amount = 0.0
     total_3b_amount = 0.0
     late_filings = 0
-    missed_filings = 0
 
     if uploaded_gst_data:
         gst_records = uploaded_gst_data
@@ -153,8 +150,6 @@ def detect_circular_trading(target_gstin: str, transaction_ledgers: List[Dict[st
                 for n in cycle:
                     circular_nodes_set.add(n)
 
-    risk_level = "HIGH" if suspicious_cycles else "LOW"
-    
     # Build exact PyVis readable formatting
     nodes_data = []
     for node in G.nodes():

@@ -1,22 +1,18 @@
-import os
 import re
-import math
 import time
-import json
 import logging
 import concurrent.futures
 import hashlib
 from typing import Dict, Any, List, Optional
 import io
 import datetime
-import traceback
 import asyncio
 
 # Document Processing Imports
 import boto3
 import pdfplumber
 import fitz  # PyMuPDF
-from PIL import Image, ImageFilter
+from PIL import Image
 import cv2
 import numpy as np
 import pytesseract

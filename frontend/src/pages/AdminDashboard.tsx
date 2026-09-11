@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import {
     LayoutDashboard, Users, Shield, History, LogOut, Search,
-    FileText, AlertTriangle, BarChart3, RefreshCw, Copy,
+    FileText, AlertTriangle, BarChart3, RefreshCw,
     CheckCircle, Cpu, Activity, Lock, Globe, Clock,
     TrendingUp, Zap, Bell, ChevronDown, User,
-    Save, Building, Briefcase, Key, ShieldCheck, Monitor, MapPin,
-    ArrowUpRight, ArrowDownRight, Menu
+    Save, Building, Briefcase, Key, ShieldCheck, Monitor
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
@@ -242,15 +241,7 @@ const AdminDashboard: React.FC = () => {
     const { user, logout } = useAuth();
     const [activeTab, setActiveTab] = useState('operations');
     const [dropdownOpen, setDropdownOpen] = useState(false);
-    const [copied, setCopied] = useState(false);
-    const [apiKey] = useState('creditiq_sk_live_2837xxxxxx');
     const [rbacRole, setRbacRole] = useState('Admin');
-
-    const handleCopy = () => {
-        navigator.clipboard.writeText(apiKey);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
 
     const sidebarItems = [
         { id: 'operations', label: 'Operations', icon: LayoutDashboard },

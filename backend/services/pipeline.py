@@ -2,13 +2,12 @@ import os
 import asyncio
 import traceback
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any
 
-from sqlalchemy.orm import Session
 from database import SessionLocal
 from models.company import Company
 from models.analysis import Analysis
-from models.ews import EWSSignal, EWSTrajectory
+from models.ews import EWSTrajectory
 
 # Import strictly real internal systems
 from services.ocr_service import extract_financial_data
@@ -85,7 +84,7 @@ async def run_full_analysis(analysis_id: int):
             
             await _notify_ws(analysis_id, "INITIALIZATION", 5, "Securing pipeline worker allocation...")
             await asyncio.sleep(1) # Visual pacing for UI smoothness
-        except Exception as e:
+        except Exception:
             logger.error(f"Init Error: {traceback.format_exc()}")
             return
         
@@ -275,11 +274,11 @@ async def run_full_analysis(analysis_id: int):
             db.add(new_traj)
             db.commit()
             success_flags["EWS"] = True
-        except Exception as e:
+        except Exception:
             logger.error(f"Step 8 EWS Init Error: {traceback.format_exc()}")
             db.rollback()
 
-    except Exception as grand_error:
+    except Exception:
         # GRAND FAULT TRAP
         logger.error(f"MASSIVE PIPELINE CRASH: {traceback.format_exc()}")
         try:
