@@ -101,7 +101,7 @@ async def generate_cam_document(analysis_id: int, body: CAMRequest = CAMRequest(
         cam_res = await asyncio.to_thread(cam_service.generate_cam, analysis_data, field_observations)
         
         # In a real app we'd save paths back to db if newly generated
-        analysis.cam_document_path = cam_res.get("word_document_path")
+        analysis.cam_document_path = cam_res.get("pdf_document_path")
         analysis.cam_pdf_path = cam_res.get("pdf_document_path")
         db.commit()
     finally:
@@ -122,8 +122,7 @@ async def generate_cam_document(analysis_id: int, body: CAMRequest = CAMRequest(
 
 @router.get("/api/cam/download/{analysis_id}")
 def download_cam(
-    analysis_id: int, 
-    format: str = Query(..., description="Document format: 'word' or 'pdf'"),
+    analysis_id: int,
     demo: str = Query(None, description="Demo Account No or PAN"),
     db: Session = Depends(get_db)
 ):
@@ -137,23 +136,20 @@ def download_cam(
             company_name = "Tech_Mahindra_Limited"
         elif demo in ['AAACI6789N', '67289103452']:
             company_name = "Infosys_Limited"
-            
+
         if company_name:
-            ext = ".docx" if format.lower() == "word" else ".pdf"
-            media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if ext == ".docx" else "application/pdf"
-            pattern = f"docs/CreditIQ_CAM_{company_name}_*{ext}"
-            files = glob.glob(pattern)
-            if not files:
-                pattern2 = f"docs/CreditIQ_CAM__{company_name}_*{ext}"
-                files = glob.glob(pattern2)
-                
+            # Pre-seeded demo CAMs live under docs/ with a couple of legacy prefixes.
+            files = []
+            for prefix in ("CreditIQ_CAM_", "CreditIQ_CAM__", "KARTA_CAM_", "KARTA_CAM__"):
+                files.extend(glob.glob(f"docs/{prefix}{company_name}_*.pdf"))
+
             if files:
                 files.sort(key=os.path.getmtime, reverse=True)
                 file_path = files[0]
                 filename = os.path.basename(file_path)
                 return FileResponse(
-                    path=file_path, 
-                    media_type=media_type, 
+                    path=file_path,
+                    media_type="application/pdf",
                     filename=filename,
                     headers={"Content-Disposition": f"attachment; filename={filename}"}
                 )
@@ -161,34 +157,25 @@ def download_cam(
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
-        
+
     company = db.query(Company).filter(Company.id == analysis.company_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-        
-    if format.lower() not in ["word", "pdf"]:
-        raise HTTPException(status_code=400, detail="Invalid format. Use 'word' or 'pdf'.")
-        
+
     # Generate filename dynamically based off Company mapping
     date_str = datetime.now().strftime("%Y-%m-%d")
     safe_company_name = company.company_name.replace(" ", "_").replace("/", "-")
-    
-    ext = ".docx" if format.lower() == "word" else ".pdf"
-    media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if ext == ".docx" else "application/pdf"
-    filename = f"CreditIQ_CAM_{safe_company_name}_{date_str}{ext}"
-    
-    # If format is PDF but file doesn't exist, raise error and explain why.
-    if format.lower() == "pdf" and (not analysis.cam_pdf_path or not os.path.exists(analysis.cam_pdf_path)):
-         raise HTTPException(
-             status_code=500, 
-             detail="Physical PDF document not found on server. Ensure Microsoft Word is installed for native PDF conversion from the synthesized Word document."
-         )
-         
-    file_path = analysis.cam_document_path if format.lower() == "word" else analysis.cam_pdf_path
-    
+    filename = f"CreditIQ_CAM_{safe_company_name}_{date_str}.pdf"
+
+    if not analysis.cam_pdf_path or not os.path.exists(analysis.cam_pdf_path):
+        raise HTTPException(
+            status_code=404,
+            detail="CAM PDF not found on server. Please generate the CAM document for this analysis first."
+        )
+
     return FileResponse(
-        path=file_path, 
-        media_type=media_type, 
+        path=analysis.cam_pdf_path,
+        media_type="application/pdf",
         filename=filename,
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )

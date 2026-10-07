@@ -174,7 +174,7 @@ async def run_analysis_background(analysis_id: int):
         if not cam_res.get("success"):
              raise Exception(f"Claude AI Document Synthesis Failed: {cam_res.get('error', 'Unknown Error')}")
              
-        analysis.cam_document_path = cam_res.get("word_document_path", "")
+        analysis.cam_document_path = cam_res.get("pdf_document_path", "")
         analysis.cam_pdf_path = cam_res.get("pdf_document_path", "")
         
         # Build strict JSON payload for dashboard results to avoid DB schema migrations

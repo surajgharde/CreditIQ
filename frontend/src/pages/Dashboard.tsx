@@ -296,7 +296,7 @@ function Dashboard() {
           <Link to={`/warning-system?company_id=${data.company.cin_number ? '1' : '1'}&id=${analysisId}`} className="btn-action" style={{ textDecoration: 'none', background: '#0d3b38', color: 'white', display: 'flex', alignItems: 'center', gap: 8, padding: '12px 20px', borderRadius: 8 }}>
             <AlertTriangle size={20} /> EWS Monitor
           </Link>
-          <button onClick={() => downloadCAM(analysisId, 'pdf', demoParam)} className="btn-action btn-download" style={{ border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
+          <button onClick={() => downloadCAM(analysisId, demoParam)} className="btn-action btn-download" style={{ border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
             <FileText size={20} /> Download CAM Report
           </button>
         </div>

@@ -21,7 +21,7 @@ beautifulsoup4
 cohere
 opencv-python-headless
 deep-translator
-python-docx
+reportlab
 fake-useragent
 feedparser
 PyMuPDF

@@ -216,7 +216,7 @@ async def run_full_analysis(analysis_id: int):
         # ==========================================
         # STEP 6: CLAUDE NATIVE CAM GENERATION
         # ==========================================
-        await _notify_ws(analysis_id, "CAM GENERATION", 85, "Booting Anthropic LLM to synthesize DOCX physical files...")
+        await _notify_ws(analysis_id, "CAM GENERATION", 85, "Booting Anthropic LLM to synthesize the CAM PDF...")
         try:
             cam_data = {
                 "company": {
@@ -232,7 +232,7 @@ async def run_full_analysis(analysis_id: int):
             cam_result = generate_cam(cam_data)
             master_state["cam"] = cam_result
             success_flags["CAM"] = True
-            await _notify_ws(analysis_id, "CAM GENERATION", 95, "Credit Appraisal Word Document rendered and saved.")
+            await _notify_ws(analysis_id, "CAM GENERATION", 95, "Credit Appraisal PDF rendered and saved.")
         except Exception as e:
             logger.error(f"Step 6 Failed: {traceback.format_exc()}")
             master_state["cam"] = {"error": str(e)}

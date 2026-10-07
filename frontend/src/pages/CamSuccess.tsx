@@ -157,8 +157,8 @@ function CamSuccess() {
     }
   };
 
-  const handleDownload = (format: 'word' | 'pdf') => {
-    downloadCAM(analysisId, format);
+  const handleDownload = () => {
+    downloadCAM(analysisId);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 3000);
   };
@@ -460,28 +460,16 @@ function CamSuccess() {
                   Download Official Document
                 </div>
 
-                <button onClick={() => handleDownload('word')} style={{
+                <button onClick={handleDownload} style={{
                   width: '100%', padding: '16px', background: 'linear-gradient(135deg,#0f766e,#0d9488)',
                   color: 'white', border: 'none', borderRadius: 12, cursor: 'pointer', fontWeight: 700,
-                  marginBottom: 12, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10,
+                  display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10,
                   fontSize: '0.92rem', boxShadow: '0 4px 12px rgba(13,148,136,0.3)', transition: 'transform 0.2s',
                 }}
                   onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
                   onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
                 >
-                  <Download size={18} /> Download as Word (.docx)
-                </button>
-
-                <button onClick={() => handleDownload('pdf')} style={{
-                  width: '100%', padding: '16px', background: 'linear-gradient(135deg,#B91C1C,#DC2626)',
-                  color: 'white', border: 'none', borderRadius: 12, cursor: 'pointer', fontWeight: 700,
-                  display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10,
-                  fontSize: '0.92rem', boxShadow: '0 4px 12px rgba(220,38,38,0.3)', transition: 'transform 0.2s',
-                }}
-                  onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
-                  onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
-                >
-                  <FileText size={18} /> Download as PDF
+                  <Download size={18} /> Download CAM as PDF
                 </button>
 
                 <div style={{ marginTop: 16, padding: '12px 14px', background: '#F8FAFC', borderRadius: 10, border: '1px solid #E2E8F0', fontSize: '0.72rem', color: '#64748B', lineHeight: 1.6 }}>

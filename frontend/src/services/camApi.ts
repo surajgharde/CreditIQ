@@ -8,7 +8,6 @@ export interface CAMGenerateResult {
   success: boolean;
   cam_id: number;
   document_ready: boolean;
-  word_document_url: string;
   pdf_document_url: string;
   pages_count: number;
   sections_included: string[];
@@ -40,15 +39,14 @@ export async function getCAMPreview(analysisId: number): Promise<CAMPreview> {
   return res.data;
 }
 
-/** 
- * Trigger real browser file download.
+/**
+ * Trigger real browser download of the generated CAM PDF.
  * Opens the download URL in a hidden anchor tag.
- * format: 'word' | 'pdf'
  */
-export function downloadCAM(analysisId: number, format: 'word' | 'pdf', demo?: string | null): void {
-  let url = `${window.location.origin}/api/cam/download/${analysisId}?format=${format}`;
+export function downloadCAM(analysisId: number, demo?: string | null): void {
+  let url = `${window.location.origin}/api/cam/download/${analysisId}`;
   if (demo) {
-    url += `&demo=${demo}`;
+    url += `?demo=${demo}`;
   }
   const a = document.createElement('a');
   a.href = url;
