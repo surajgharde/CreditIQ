@@ -40,7 +40,7 @@ cd your-project-folder
 
 cd frontend
 npm install
-npm start
+npm run dev
 
 cd backend
 # pip install -r requirements.txt
