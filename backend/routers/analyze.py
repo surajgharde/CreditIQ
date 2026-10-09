@@ -61,8 +61,23 @@ async def run_analysis_background(analysis_id: int):
             
         loop = asyncio.get_event_loop()
         ocr_res = await asyncio.to_thread(ocr_service.extract_financial_data, file_paths, str(analysis_id), loop)
+        # ocr_service signals failure two different ways: "error" for a bad input
+        # path, and "error_detected"/"error_message" when extraction ran but
+        # recovered nothing. Only the first was checked before, so an empty
+        # extraction fell through and the whole appraisal was then computed from
+        # scoring_service's hardcoded fallback ratios — a decision with no real
+        # financials behind it. Both shapes now stop the pipeline.
         if "error" in ocr_res:
              raise Exception(f"OCR Extraction Source Failed: {ocr_res['error']}")
+        if ocr_res.get("error_detected"):
+             raise Exception(
+                 "OCR Extraction Source Failed: "
+                 f"{ocr_res.get('error_message', 'no financial data recovered')} "
+                 "No financial statement lines could be read from the uploaded documents, "
+                 "so no credit decision can be produced. If the balance sheet is a scan, "
+                 "an OCR engine must be available: install Tesseract, or set valid AWS "
+                 "credentials for Textract."
+             )
              
         analysis.data_quality_score = ocr_res.get("data_quality_score", 0.0)
         analysis.progress = 30.0

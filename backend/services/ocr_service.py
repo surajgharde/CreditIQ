@@ -154,7 +154,10 @@ def ocr_page_tesseract(page_img: Image.Image, lang: str = "eng") -> tuple[str, f
         text = " ".join(full_text)
         avg_conf = float(np.mean(word_scores)) if word_scores else 0.0
         return text, avg_conf
-    except Exception:
+    except Exception as e:
+        # Swallowing this silently made a missing Tesseract binary look like a
+        # clean run that simply found no data. Log it so the cause is visible.
+        logger.warning("Tesseract OCR unavailable or failed: %s: %s", type(e).__name__, e)
         return "", 0.0
 
 def ocr_page_textract(page_img: Image.Image) -> tuple[str, float]:
@@ -178,7 +181,8 @@ def ocr_page_textract(page_img: Image.Image) -> tuple[str, float]:
                 
         avg_conf = float(np.mean(confidences)) if confidences else 100.0
         return text, avg_conf
-    except Exception:
+    except Exception as e:
+        logger.warning("AWS Textract fallback failed: %s: %s", type(e).__name__, e)
         return "", 0.0
 
 # ----------------------------------------------------
@@ -276,27 +280,72 @@ def clean_indian_numbers(text: str) -> str:
     cleaned = re.sub(r'(?<=\d),(?=\d)', '', text)
     return cleaned
 
-def parse_financial_value(text: str, current_year: bool = True) -> tuple[Optional[float], float]:
-    """Helper to regex extract clean float. Returns (value, confidence_field)."""
-    # R6: Confidence per field
-    base_conf = 85.0
-    match = re.search(r'[\d,]+\.?\d*', text)
-    if match:
-        val_str = match.group(0).replace(',', '')
+# Indian statements lay rows out as: Particulars | Note | Current year | Prior year.
+# Taking the first number on the row therefore picks up the note reference, not
+# the amount — "Revenue from operations 2 500000000" would read as 2. Candidates
+# that look like note references or financial years are dropped before choosing.
+NOTE_REF_CEILING = 100.0
+
+
+def _numeric_candidates(text: str) -> list:
+    """Numbers in the block, in reading order, as (value, had_decimal)."""
+    out = []
+    for raw in re.findall(r'\d[\d,]*\.?\d*', text):
+        token = raw.replace(',', '').rstrip('.')
+        if not token:
+            continue
         try:
-            # R6: Deduct confidence if OCR was messy around numbers
-            if "!" in text or "?" in text:
-                base_conf -= 15.0
-            return float(val_str), base_conf
+            out.append((float(token), '.' in raw))
         except ValueError:
-            pass
-    return None, 30.0
+            continue
+    return out
+
+
+def parse_financial_value(text: str, current_year: bool = True) -> tuple[Optional[float], float]:
+    """
+    Extracts the amount for a statement row. Returns (value, confidence_field).
+
+    Picks the first candidate that is not a note reference or a financial year,
+    which maps to the current-year column in a standard Indian layout.
+    """
+    base_conf = 85.0
+    candidates = _numeric_candidates(text)
+    if not candidates:
+        return None, 30.0
+
+    def is_note_ref(value, had_decimal):
+        # Bare small integers in a statement row are note/serial references.
+        return not had_decimal and value < NOTE_REF_CEILING and value == int(value)
+
+    def is_year(value, had_decimal):
+        return not had_decimal and 1900 <= value <= 2100 and value == int(value)
+
+    amounts = [
+        (v, d) for v, d in candidates
+        if not is_note_ref(v, d) and not is_year(v, d)
+    ]
+
+    if not amounts:
+        # Every candidate was a note reference, section number or year. Reporting
+        # the largest of those as an amount is how "revenue of 2" happens, so the
+        # field is left unextracted and reads downstream as "Not extracted".
+        return None, 30.0
+
+    value, _ = amounts[0]
+
+    # R6: Deduct confidence if OCR was messy around numbers
+    if "!" in text or "?" in text:
+        base_conf -= 15.0
+    return value, max(0.0, base_conf)
 
 def find_financial_indicators(text: str) -> Dict[str, Any]:
     """Runs keyword clustering regex against the raw document text."""
     indicators = {}
-    lines = text.lower().split('\n')
-    
+    # Statements write the same label as "Cash & Cash Equivalents" or
+    # "Cash and Cash Equivalents"; normalising the ampersand lets one pattern
+    # match both spellings.
+    lines = re.sub(r'\s*&\s*', ' and ', text.lower()).split('\n')
+
     keywords = {
         "revenue_fy24": ["revenue from operations", "net sales", "total income", "turnover", "operating revenue", "revenue"],
         "cogs": ["cost of goods sold", "cogs", "cost of materials consumed", "purchases of stock"],
@@ -310,25 +359,41 @@ def find_financial_indicators(text: str) -> Dict[str, Any]:
         "total_debt": ["total debt", "total borrowings", "long term borrowings"],
         "current_assets": ["current assets", "total current assets"],
         "current_liabilities": ["current liabilities", "total current liabilities"],
-        "cash_equivalents": ["cash and cash equivalents", "cash & bank balances"],
+        "cash_equivalents": ["cash and cash equivalents", "cash and bank balances"],
         "interest_expense": ["finance costs", "interest expense", "interest paid"]
     }
 
     field_confidences = []
 
+    # Short acronyms must match as whole words: a plain substring test makes
+    # "ebit" match inside "ebitda", so EBIT silently takes EBITDA's amount.
+    # Longer multi-word phrases are matched as substrings, which is safe.
+    def matches(line: str, pattern: str) -> bool:
+        if len(pattern) <= 5 and " " not in pattern:
+            return re.search(r'' + re.escape(pattern) + r'', line) is not None
+        # "current assets" and "current liabilities" are substrings of their own
+        # "non-current" counterparts, so a plain test matches the wrong section
+        # header and reads its section number as the amount.
+        if pattern.startswith("current "):
+            return re.search(r'(?<!non-)(?<!non )' + re.escape(pattern), line) is not None
+        return pattern in line
+
     for key, patterns in keywords.items():
         for i, line in enumerate(lines):
-            if any(pattern in line for pattern in patterns):
-                search_block = " ".join(lines[i:min(i+3, len(lines))])
-                val, conf = parse_financial_value(search_block)
+            if any(matches(line, pattern) for pattern in patterns):
+                # Search the label's own line first; only spill into following
+                # lines when the amount is not on it (wrapped table rows).
+                val, conf = parse_financial_value(line)
+                if val is None:
+                    search_block = " ".join(lines[i:min(i + 3, len(lines))])
+                    val, conf = parse_financial_value(search_block)
                 if val is not None:
-                    # R6: Use Sector average or discard if under 30%
                     if conf < 30.0:
-                        break # Discard
+                        break  # Too doubtful to record
                     indicators[key] = val
                     field_confidences.append(conf)
                     break
-                    
+
     avg_field_conf = float(np.mean(field_confidences)) if field_confidences else 0.0
     return indicators, avg_field_conf
 
@@ -412,7 +477,12 @@ def extract_financial_data(file_paths: list[str], analysis_id: str = None, loop=
         if not found_indicators:
             return {
                 "error_detected": True,
-                "error_message": "Document does not appear to contain standard financial statement data. Use a clearer version.",
+                "error_message": (
+                    "No financial statement lines were recognised in the document. "
+                    "If it is a scan, check the OCR engines: Tesseract must be installed "
+                    "and on PATH, or AWS credentials must be valid for the Textract "
+                    "fallback. Otherwise supply a clearer copy."
+                ),
                 "data_quality_score": 0.0,
                 "pages_processed": total_pages,
                 **found_indicators

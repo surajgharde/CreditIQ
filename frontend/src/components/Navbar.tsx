@@ -85,6 +85,11 @@ export default function Navbar({ activeSection, onScrollTo }: NavbarProps) {
                     Start Analysis
                   </Link>
                 </motion.div>
+                <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}>
+                  <Link to="/profile" className="creditiq-btn creditiq-btn--ghost">
+                    Profile
+                  </Link>
+                </motion.div>
                 <motion.button
                   onClick={logout}
                   className="creditiq-btn creditiq-btn--ghost"
@@ -136,6 +141,9 @@ export default function Navbar({ activeSection, onScrollTo }: NavbarProps) {
               <>
                 <Link to="/newanalysis" className="creditiq-btn creditiq-btn--primary" onClick={() => setMobileOpen(false)}>
                   Start Analysis
+                </Link>
+                <Link to="/profile" className="creditiq-btn creditiq-btn--ghost" onClick={() => setMobileOpen(false)}>
+                  Profile
                 </Link>
                 <button onClick={() => { logout(); setMobileOpen(false); }} className="creditiq-btn creditiq-btn--ghost">
                   Logout

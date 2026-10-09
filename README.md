@@ -46,6 +46,9 @@ signals, and document the reasoning behind a decision.
   when no key is configured.
 - 🌐 **Multilingual input:** Language detection and translation on the document
   ingest path (English / Hindi / Marathi).
+- 🤖 **Telegram bot:** Query analyses and decisions from Telegram. Each chat is
+  linked to one company from the Profile page and is answered only about that
+  company (see *The Telegram bot* below).
 
 ---
 
@@ -150,6 +153,19 @@ and the CAM router threads them into the payload as `financials`. They drive:
 is emitted only when its inputs were actually extracted, so a missing key reads
 downstream as "not extracted" instead of being silently defaulted.
 
+**Scanned documents need an OCR engine.** A PDF with no text layer goes to
+Tesseract, falling back to AWS Textract. If neither is available the extraction
+recovers nothing, and the analysis now **stops with an actionable error** rather
+than proceeding — previously it continued and produced a credit decision built
+entirely from `scoring_service`'s fallback ratio constants. Install Tesseract
+and put it on PATH, or set valid AWS credentials.
+
+**Known extraction limit.** Current assets and current liabilities are only read
+from an explicit total line. Statements that list components without a total
+(Inventories / Receivables / Cash / Other) leave both unextracted, so the
+current ratio and DSCR are reported as not extracted. Summing component rows is
+not yet implemented.
+
 DSCR and `revenue_growth_percent` still cannot be derived — the first needs a
 debt-service schedule and the second needs prior-year revenue, neither of which
 is extracted. Both are labelled as such rather than estimated.
@@ -157,6 +173,58 @@ is extracted. Both are labelled as such rather than estimated.
 If a section request fails it is retried once; a failed section is marked in the
 document and listed in `sections_failed` on the response. Generation aborts only
 if more than half the sections fail.
+
+### The Telegram bot
+
+`/api/telegram/webhook` receives updates in production;
+`backend/telegram_bot.py` long-polls the same handler for local development,
+where there is no public HTTPS URL. Run only one of the two — Telegram permits a
+single delivery method, and the poller clears any registered webhook on startup.
+
+```bash
+cd backend
+python telegram_bot.py
+```
+
+Commands: `/list`, `/status <id>`, `/decision <id>`, `/ask <question>` (relayed
+to the multilingual assistant), `/whoami`, `/help`.
+
+**Access control** is two-tier and default-deny. A Telegram bot can be messaged
+by anyone who knows its handle, so nothing is served without an explicit grant:
+
+| Chat kind | Granted by | Sees |
+| --- | --- | --- |
+| Company-linked | **Profile page** → Telegram chat access | Only the company it is linked to |
+| Operator | `TELEGRAM_ALLOWED_CHAT_IDS` in `.env` | Every company |
+| Anything else | — | Nothing |
+
+A company-linked chat is confined in SQL: `/list` returns only that company's
+analyses, and `/status`/`/decision` filter on `company_id`, so asking for
+another borrower's analysis id returns "No analysis #N available to you" —
+deliberately the same wording whether the id is absent or belongs to someone
+else, since a different message would confirm it exists.
+
+`/whoami` stays open to everyone so a contact can report their own ID; it
+reveals nothing about any borrower.
+
+**Linking a chat.** Profile → *Telegram chat access*: paste the chat ID, choose
+the company, and optionally label the contact. The contact gets the ID by
+sending `/whoami` to the bot. Re-submitting an existing chat ID re-points it
+rather than adding a second row, so a chat can never resolve to two companies.
+Links can be disabled without deleting, and *Send test* confirms the ID is
+right — note a bot cannot message someone who has never written to it first,
+which is the usual cause of a failed test.
+
+Company-linked chats also get `/latest`, which returns their most recent
+assessment without needing an id.
+
+Set `TELEGRAM_WEBHOOK_SECRET` whenever you use the webhook: the endpoint is
+public, and the secret is checked against the header Telegram sends. The webhook
+returns 200 even when handling fails, because a non-200 makes Telegram retry the
+same update indefinitely.
+
+Replies carry a prototype disclaimer, and any analysis whose data quality score
+is zero is flagged as resting on fallback constants rather than real statements.
 
 ### Pre-trained models
 
@@ -184,6 +252,9 @@ cp backend/.env.example backend/.env
 | `COHERE_API_KEY` | CAM generation | Without it, CAM generation raises. Everything else works. |
 | `OPENAI_API_KEY` | Chat assistant | Without it, `/api/chat` returns 503 and the UI uses canned replies. `OPENAI_API` is accepted as a legacy alias. |
 | `CAM_SECTION_WORDS` / `CAM_CONCURRENCY` / `CAM_MODEL` | CAM tuning | Optional. Defaults 175 / 4 / `command-r-08-2024`. |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot | From @BotFather. Without it the bot is inert and `/api/telegram/*` returns 503. |
+| `TELEGRAM_ALLOWED_CHAT_IDS` | Telegram operator chats | Comma-separated numeric chat IDs that see every company. Company-scoped access is granted in the Profile page instead, not here. |
+| `TELEGRAM_WEBHOOK_SECRET` | Telegram webhook | Required when using the webhook rather than the poller. |
 | `JWT_SECRET` | Auth tokens | Any long random string. |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Scanned-PDF OCR | Falls back to Tesseract when absent. |
 | `NEWS_API_KEY` | Adverse-media retrieval | News risk degrades to a neutral score without it. |

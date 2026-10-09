@@ -7,6 +7,7 @@ import FraudReport from './pages/FraudReport';
 import WarningSystem from './pages/WarningSystem';
 import CamSuccess from './pages/CamSuccess';
 import History from './pages/History';
+import Profile from './pages/Profile';
 
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -25,6 +26,7 @@ function App() {
           <Route path="/new-analysis" element={<ProtectedRoute><NewAnalysis /></ProtectedRoute>} />
           <Route path="/newanalysis" element={<ProtectedRoute><NewAnalysis /></ProtectedRoute>} />
           <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
           <Route path="/analysis" element={<ProtectedRoute><Analysis /></ProtectedRoute>} />
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/fraud-report" element={<ProtectedRoute><FraudReport /></ProtectedRoute>} />

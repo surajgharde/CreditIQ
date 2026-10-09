@@ -7,6 +7,7 @@ from models.fraud import FraudSignal
 from models.ews import EWSSignal, EWSTrajectory
 from models.user import User
 from models.draft import FormDraft
+from models.telegram_link import TelegramLink
 
 __all__ = [
     "Company",
@@ -16,4 +17,5 @@ __all__ = [
     "EWSTrajectory",
     "User",
     "FormDraft",
+    "TelegramLink",
 ]
