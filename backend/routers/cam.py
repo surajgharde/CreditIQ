@@ -130,12 +130,12 @@ def download_cam(
 
     if demo:
         company_name = ""
-        if demo in ['AAACB1234M', '45678219304']:
-            company_name = "Tata_Consultancy_Services_Limited"
-        elif demo in ['AAACM5678L', '58923104765']:
-            company_name = "Tech_Mahindra_Limited"
-        elif demo in ['AAACI6789N', '67289103452']:
-            company_name = "Infosys_Limited"
+        if demo in ['ZZZCS1001A', '45678219304']:
+            company_name = "Suryanex_Industries_Limited"
+        elif demo in ['ZZZCZ1002B', '58923104765']:
+            company_name = "Zentara_Polymers_Limited"
+        elif demo in ['ZZZCV1003C', '67289103452']:
+            company_name = "Velmora_Agritech_Limited"
 
         if company_name:
             # Pre-seeded demo CAMs live under docs/ with a couple of legacy prefixes.

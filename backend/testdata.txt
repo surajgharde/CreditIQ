@@ -9,34 +9,34 @@ Create a seamless, demo-ready experience where users upload documents, observe t
 
 Create a structured dataset (JSON or JS object) with the following companies:
 
-* Accepted Case (TCS):
-  Name: Tata Consultancy Services Limited
+* Accepted Case:
+  Name: Suryanex Industries Limited
   Account No: 45678219304
-  CIN: U22210MH1995PLC084781
-  PAN: AAACB1234M
-  GSTIN: 27AAACB1234M1ZV
+  CIN: U28990MH2015PTC100001
+  PAN: ZZZCS1001A
+  GSTIN: 27ZZZCS1001A1Z5
   Status: APPROVED
   Risk: LOW
   Reason: Strong financial stability, consistent transactions, no fraud signals
 
 so add this featuire as well ok
 
-* Rejected Case (Tech Mahindra):
-  Name: Tech Mahindra Limited
+* Rejected Case:
+  Name: Zentara Polymers Limited
   Account No: 58923104765
-  CIN: U72100MH1986PLC041370
-  PAN: AAACM5678L
-  GSTIN: 27AAACM5678L1ZS
+  CIN: U24100MH2012PTC100002
+  PAN: ZZZCZ1002B
+  GSTIN: 27ZZZCZ1002B1Z6
   Status: REJECTED
   Risk: HIGH
   Reason: Suspicious transactions, GST mismatch, high liabilities
 
-* Conditional Case (Infosys):
-  Name: Infosys Limited
+* Conditional Case:
+  Name: Velmora Agritech Limited
   Account No: 67289103452
-  CIN: L85110KA1981PLC013115
-  PAN: AAACI6789N
-  GSTIN: 29AAACI6789N1ZT
+  CIN: U01100KA2016PTC100003
+  PAN: ZZZCV1003C
+  GSTIN: 29ZZZCV1003C1Z7
   Status: CONDITIONAL
   Risk: MEDIUM
   Conditions: Requires verification, moderate cash flow risk, manual review needed

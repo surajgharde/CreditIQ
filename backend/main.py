@@ -63,7 +63,7 @@ try:
         db.close()
 
     # === STEP B: ML Services & Routers ===
-    from routers import upload, analyze, fraud, scoring, cam, ews, ws, history, ews_ws, health_live, auth, draft
+    from routers import upload, analyze, fraud, scoring, cam, ews, ws, history, ews_ws, health_live, auth, draft, chat
 
 
     app.include_router(upload.router, tags=["Upload"])
@@ -78,6 +78,7 @@ try:
     app.include_router(ews_ws.router)
     app.include_router(health_live.router)
     app.include_router(draft.router)
+    app.include_router(chat.router, tags=["Chat"])
 
     print("All components loaded. Server ready to listen on $PORT.")
 

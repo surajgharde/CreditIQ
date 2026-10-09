@@ -27,32 +27,32 @@ function Dashboard() {
 
   if (demoParam) {
     const input = demoParam.trim().toUpperCase();
-    const tcs = ['AAACB1234M', '45678219304'];
-    const techm = ['AAACM5678L', '58923104765'];
-    const infosys = ['AAACI6789N', '67289103452'];
+    const approveDemo = ['ZZZCS1001A', '45678219304'];
+    const rejectDemo = ['ZZZCZ1002B', '58923104765'];
+    const conditionalDemo = ['ZZZCV1003C', '67289103452'];
 
     let mockData = null;
-    if (tcs.includes(input)) {
+    if (approveDemo.includes(input)) {
       mockData = {
-        company: { company_name: 'Tata Consultancy Services Limited', cin_number: 'U22210MH1995PLC084781', pan_number: 'AAACB1234M' },
+        company: { company_name: 'Suryanex Industries Limited', cin_number: 'U28990MH2015PTC100001', pan_number: 'ZZZCS1001A' },
         decision: { decision: 'APPROVE', probability_of_default: 12.5, recommended_loan_amount: 30000000, recommended_interest_rate: 10.5, data_quality_score: 95 },
         fraud: { overall_fraud_risk: 'LOW', total_signals_found: 0, signals: [] },
         news: { news_risk_score: 15, top_signals: [] },
         recommendation: { decision_reasoning: 'Strong financial stability, consistent transactions, no fraud signals.', conditions: [], interest_rate_breakdown: 'Base 8% + Risk Premium 2.5%' },
         shap: { base_risk: 15, final_pd: 12.5, shap_factors: [{ name: 'Stable Cash Flow', impact: '-1.5' }, { name: 'High Revenue Growth', impact: '-1.0' }] }
       };
-    } else if (techm.includes(input)) {
+    } else if (rejectDemo.includes(input)) {
       mockData = {
-        company: { company_name: 'Tech Mahindra Limited', cin_number: 'U72100MH1986PLC041370', pan_number: 'AAACM5678L' },
+        company: { company_name: 'Zentara Polymers Limited', cin_number: 'U24100MH2012PTC100002', pan_number: 'ZZZCZ1002B' },
         decision: { decision: 'REJECT', probability_of_default: 85.2, recommended_loan_amount: 0, recommended_interest_rate: 0, data_quality_score: 88 },
         fraud: { overall_fraud_risk: 'HIGH', total_signals_found: 3, signals: [{ description: 'Suspicious transactions', confidence_score: 92 }, { description: 'GST mismatch', confidence_score: 85 }, { description: 'High liabilities', confidence_score: 78 }] },
         news: { news_risk_score: 80, top_signals: [{ risk: 'HIGH', signal: 'Negative market sentiment' }] },
         recommendation: { decision_reasoning: 'Suspicious transactions, GST mismatch, high liabilities.', conditions: [], interest_rate_breakdown: 'N/A' },
         shap: { base_risk: 15, final_pd: 85.2, shap_factors: [{ name: 'GST Mismatch', impact: '+40.5' }, { name: 'Suspicious Transactions', impact: '+29.7' }] }
       };
-    } else if (infosys.includes(input)) {
+    } else if (conditionalDemo.includes(input)) {
       mockData = {
-        company: { company_name: 'Infosys Limited', cin_number: 'L85110KA1981PLC013115', pan_number: 'AAACI6789N' },
+        company: { company_name: 'Velmora Agritech Limited', cin_number: 'U01100KA2016PTC100003', pan_number: 'ZZZCV1003C' },
         decision: { decision: 'CONDITIONAL', probability_of_default: 25.4, recommended_loan_amount: 20000000, recommended_interest_rate: 12.5, data_quality_score: 90 },
         fraud: { overall_fraud_risk: 'MEDIUM', total_signals_found: 1, signals: [{ description: 'Moderate cash flow risk', confidence_score: 65 }] },
         news: { news_risk_score: 40, top_signals: [] },

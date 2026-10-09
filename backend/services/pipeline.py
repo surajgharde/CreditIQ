@@ -216,7 +216,7 @@ async def run_full_analysis(analysis_id: int):
         # ==========================================
         # STEP 6: CLAUDE NATIVE CAM GENERATION
         # ==========================================
-        await _notify_ws(analysis_id, "CAM GENERATION", 85, "Booting Anthropic LLM to synthesize the CAM PDF...")
+        await _notify_ws(analysis_id, "CAM GENERATION", 85, "Synthesizing the CAM PDF via Cohere Command R...")
         try:
             cam_data = {
                 "company": {

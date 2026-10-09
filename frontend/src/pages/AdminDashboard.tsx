@@ -382,7 +382,7 @@ const AdminDashboard: React.FC = () => {
                                 <div className="ap-card-header"><AlertTriangle size={18}/> Active Risk Monitoring</div>
                                 <div className="ap-fraud-list" style={{ display: 'flex', flexDirection: 'column' }}>
                                     {[
-                                        { company: 'Reliance Exports Ltd.', issue: 'GST Mismatch (₹4.2Cr)', risk: 'High' },
+                                        { company: 'Krestline Exports Pvt. Ltd.', issue: 'GST Mismatch (₹4.2Cr)', risk: 'High' },
                                         { company: 'Bharat Steel Works', issue: 'Circular Trading Detected', risk: 'High' },
                                         { company: 'Mumbai Textile Co.', issue: 'Promoter Default (MCA)', risk: 'Medium' },
                                         { company: 'Sunrise Agro Pvt.', issue: 'News Sentiment Negative', risk: 'Medium' },
@@ -457,7 +457,7 @@ const AdminDashboard: React.FC = () => {
                                     { time: '04:12 IST', user: 'admin@gmail.com', action: 'User login successful', type: 'info' },
                                     { time: '03:58 IST', user: 'System', action: 'Analysis #1287 completed for Tata Motors', type: 'success' },
                                     { time: '03:44 IST', user: 'System', action: 'Fraud alert raised — Bharat Steel Works (Circular Trading)', type: 'danger' },
-                                    { time: '03:31 IST', user: 'ops@creditiq.ai', action: 'CAM document generated for Reliance Exports Ltd.', type: 'success' },
+                                    { time: '03:31 IST', user: 'ops@creditiq.ai', action: 'CAM document generated for Krestline Exports Pvt. Ltd.', type: 'success' },
                                     { time: '03:20 IST', user: 'System', action: 'API rate limit warning — 92% of daily quota used', type: 'warn' },
                                     { time: '02:55 IST', user: 'admin@gmail.com', action: 'API key regenerated', type: 'info' },
                                 ].map(({ time, user, action, type }, i) => (

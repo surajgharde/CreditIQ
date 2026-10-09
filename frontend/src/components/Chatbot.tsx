@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, X, Send, Bot } from 'lucide-react';
+import api from '../services/apiConfig';
 import './Chatbot.css';
 
 interface Message {
@@ -7,11 +8,13 @@ interface Message {
   text: string;
   isBot: boolean;
   lang?: Language;
+  offline?: boolean;
 }
 
 type Language = 'en' | 'hi' | 'mr';
 
-// Predefined translations
+// Offline fallback replies, used only when the backend assistant is
+// unreachable or unconfigured. The live path is POST /api/chat.
 const botResponses: Record<string, Record<Language, string>> = {
   greeting: {
     en: "Hello! I am your AI assistant. You can ask me about risk, fraud, reports, or loans.",
@@ -65,6 +68,29 @@ const botResponses: Record<string, Record<Language, string>> = {
   }
 };
 
+const offlineReply = (text: string, lang: Language): string => {
+  const lowered = text.toLowerCase();
+  let key = 'default';
+  if (lowered.match(/(risk|रिस्क|जोखिम|जोखीम)/)) key = 'risk';
+  else if (lowered.match(/(fraud|फ्रॉड|फसवणूक)/)) key = 'fraud';
+  else if (lowered.match(/(report|रिपोर्ट|अहवाल)/)) key = 'report';
+  else if (lowered.match(/(loan|लोन|कर्ज)/)) key = 'loan';
+  else if (lowered.match(/(hello|hi|hey|नमस्ते|नमस्कार)/)) key = 'greeting';
+  else if (lowered.match(/(help|मदद|मदत)/)) key = 'help';
+  else if (lowered.match(/(late|delay|देर|उशिरा)/)) key = 'delay';
+  else if (lowered.match(/(doc|document|दस्तावेज़|कागदपत्र)/)) key = 'document';
+  else if (lowered.match(/(interest|rate|ब्याज|व्याज)/)) key = 'interest';
+  return botResponses[key][lang];
+};
+
+const OFFLINE_NOTICE: Record<Language, string> = {
+  en: 'Offline reply — the AI assistant is not reachable.',
+  hi: 'ऑफ़लाइन उत्तर — एआई सहायक उपलब्ध नहीं है।',
+  mr: 'ऑफलाइन उत्तर — एआय असिस्टंट उपलब्ध नाही.'
+};
+
+const MAX_HISTORY_TURNS = 8;
+
 const Chatbot: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [input, setInput] = useState('');
@@ -78,7 +104,7 @@ const Chatbot: React.FC = () => {
             lang: 'en'
         }
     ]);
-    
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const scrollToBottom = () => {
@@ -93,7 +119,7 @@ const Chatbot: React.FC = () => {
     const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const newLang = e.target.value as Language;
         setLang(newLang);
-        
+
         // Add a greeting in the new language to acknowledge the switch
         setMessages(prev => [
             ...prev,
@@ -106,37 +132,46 @@ const Chatbot: React.FC = () => {
         ]);
     };
 
-    const handleSend = () => {
-        if (!input.trim()) return;
+    const handleSend = async () => {
+        if (!input.trim() || isTyping) return;
 
         const userText = input.trim();
         const userMsg: Message = { id: Date.now().toString(), text: userText, isBot: false };
-        
+
+        // Snapshot the transcript before this turn, for server-side context.
+        const priorTurns = messages
+            .slice(-MAX_HISTORY_TURNS)
+            .map(m => ({ role: m.isBot ? 'assistant' as const : 'user' as const, content: m.text }));
+
         setMessages(prev => [...prev, userMsg]);
         setInput('');
         setIsTyping(true);
 
-        setTimeout(() => {
-            const lowerText = userText.toLowerCase();
-            let intentKey = 'default';
-
-            // Match keywords regardless of language
-            if (lowerText.match(/(risk|रिस्क|जोखिम|जोखीम)/)) intentKey = 'risk';
-            else if (lowerText.match(/(fraud|फ्रॉड|फसवणूक)/)) intentKey = 'fraud';
-            else if (lowerText.match(/(report|रिपोर्ट|अहवाल)/)) intentKey = 'report';
-            else if (lowerText.match(/(loan|लोन|कर्ज)/)) intentKey = 'loan';
-            else if (lowerText.match(/(hello|hi|hey|नमस्ते|नमस्कार)/)) intentKey = 'greeting';
-            else if (lowerText.match(/(help|मदद|मदत)/)) intentKey = 'help';
-            else if (lowerText.match(/(late|delay|देर|उशिरा)/)) intentKey = 'delay';
-            else if (lowerText.match(/(doc|document|दस्तावेज़|कागदपत्र)/)) intentKey = 'document';
-            else if (lowerText.match(/(interest|rate|ब्याज|व्याज)/)) intentKey = 'interest';
-
-            const botResponse = botResponses[intentKey][lang];
-
-            const botMsg: Message = { id: (Date.now() + 1).toString(), text: botResponse, isBot: true, lang };
-            setMessages(prev => [...prev, botMsg]);
+        try {
+            const { data } = await api.post('/api/chat', {
+                message: userText,
+                lang,
+                history: priorTurns
+            });
+            setMessages(prev => [...prev, {
+                id: (Date.now() + 1).toString(),
+                text: data.reply,
+                isBot: true,
+                lang: (data.lang as Language) || lang
+            }]);
+        } catch {
+            // Unconfigured or unreachable backend: degrade to the canned reply
+            // rather than leaving the user with nothing.
+            setMessages(prev => [...prev, {
+                id: (Date.now() + 1).toString(),
+                text: offlineReply(userText, lang),
+                isBot: true,
+                lang,
+                offline: true
+            }]);
+        } finally {
             setIsTyping(false);
-        }, 800);
+        }
     };
 
     const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -160,9 +195,9 @@ const Chatbot: React.FC = () => {
                         {uiLabels.title[lang]}
                     </div>
                     <div className="chatbot-controls">
-                        <select 
-                            className="chatbot-lang-select" 
-                            value={lang} 
+                        <select
+                            className="chatbot-lang-select"
+                            value={lang}
                             onChange={handleLanguageChange}
                             aria-label="Select Language"
                         >
@@ -175,11 +210,14 @@ const Chatbot: React.FC = () => {
                         </button>
                     </div>
                 </div>
-                
+
                 <div className="chatbot-messages-container">
                     {messages.map((msg) => (
                         <div key={msg.id} className={`chat-bubble ${msg.isBot ? 'bot' : 'user'}`}>
                             {msg.text}
+                            {msg.offline && (
+                                <div className="chat-offline-note">{OFFLINE_NOTICE[msg.lang ?? 'en']}</div>
+                            )}
                         </div>
                     ))}
                     {isTyping && (
@@ -191,18 +229,18 @@ const Chatbot: React.FC = () => {
                     )}
                     <div ref={messagesEndRef} />
                 </div>
-                
+
                 <div className="chatbot-input-area">
-                    <input 
-                        type="text" 
-                        className="chatbot-input" 
-                        placeholder={uiLabels.placeholder[lang]} 
+                    <input
+                        type="text"
+                        className="chatbot-input"
+                        placeholder={uiLabels.placeholder[lang]}
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyPress={handleKeyPress}
                     />
-                    <button 
-                        className="chatbot-send-btn" 
+                    <button
+                        className="chatbot-send-btn"
                         onClick={handleSend}
                         disabled={!input.trim() || isTyping}
                         aria-label="Send Message"
@@ -213,8 +251,8 @@ const Chatbot: React.FC = () => {
             </div>
 
             {!isOpen && (
-                <button 
-                    className="chatbot-toggle-button" 
+                <button
+                    className="chatbot-toggle-button"
                     onClick={() => setIsOpen(true)}
                     aria-label="Open Chat"
                 >
