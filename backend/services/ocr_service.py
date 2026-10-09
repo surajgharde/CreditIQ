@@ -418,15 +418,32 @@ def extract_financial_data(file_paths: list[str], analysis_id: str = None, loop=
                 **found_indicators
             }
 
-        # Calculate math ratios
+        # Calculate math ratios.
+        # Only ratios whose inputs were actually extracted are emitted — a missing
+        # key here is read downstream as "not supplied" rather than defaulted, so
+        # never insert a placeholder value.
         ratios = {}
         try:
-            if "total_debt" in found_indicators and "total_equity" in found_indicators and found_indicators["total_equity"]>0:
-                ratios["debt_to_equity"] = round(found_indicators["total_debt"]/found_indicators["total_equity"], 2)
-            if "ebitda" in found_indicators and "revenue_fy24" in found_indicators and found_indicators["revenue_fy24"]>0:
-                ratios["ebitda_margin_percent"] = round((found_indicators["ebitda"]/found_indicators["revenue_fy24"])*100, 2)
-            if "net_profit" in found_indicators and "revenue_fy24" in found_indicators and found_indicators["revenue_fy24"]>0:
-                ratios["net_profit_margin_percent"] = round((found_indicators["net_profit"]/found_indicators["revenue_fy24"])*100, 2)
+            fi = found_indicators
+            if fi.get("total_equity", 0) > 0 and "total_debt" in fi:
+                ratios["debt_to_equity"] = round(fi["total_debt"] / fi["total_equity"], 2)
+            if fi.get("revenue_fy24", 0) > 0 and "ebitda" in fi:
+                ratios["ebitda_margin_percent"] = round((fi["ebitda"] / fi["revenue_fy24"]) * 100, 2)
+            if fi.get("revenue_fy24", 0) > 0 and "net_profit" in fi:
+                ratios["net_profit_margin_percent"] = round((fi["net_profit"] / fi["revenue_fy24"]) * 100, 2)
+            # Liquidity: consumed by the XGBoost feature vector and the CAM ratio table.
+            if fi.get("current_liabilities", 0) > 0 and "current_assets" in fi:
+                ratios["current_ratio"] = round(fi["current_assets"] / fi["current_liabilities"], 2)
+            # Interest cover: prefer EBIT, fall back to EBITDA when EBIT was not found.
+            if fi.get("interest_expense", 0) > 0:
+                earnings = fi.get("ebit", fi.get("ebitda"))
+                if earnings is not None:
+                    ratios["interest_coverage"] = round(earnings / fi["interest_expense"], 2)
+            if fi.get("revenue_fy24", 0) > 0 and "gross_profit" in fi:
+                ratios["gross_profit_margin_percent"] = round((fi["gross_profit"] / fi["revenue_fy24"]) * 100, 2)
+            # Leverage: total outside liabilities to tangible net worth.
+            if fi.get("total_equity", 0) > 0 and "total_liabilities" in fi:
+                ratios["tol_tnw"] = round(fi["total_liabilities"] / fi["total_equity"], 2)
         except Exception:
             pass
 

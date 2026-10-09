@@ -67,6 +67,14 @@ async def run_analysis_background(analysis_id: int):
         analysis.data_quality_score = ocr_res.get("data_quality_score", 0.0)
         analysis.progress = 30.0
         db.commit()
+
+        # Persist the extracted financials so the CAM generator can cite real
+        # statement lines instead of falling back to sector benchmarks.
+        import json as _json
+        import os as _os
+        _os.makedirs("data", exist_ok=True)
+        with open(f"data/financials_{analysis.id}.json", "w") as f:
+            _json.dump(ocr_res, f, indent=1)
         await ws_push(analysis_id, 2, "PdfTable OCR Engine", f"Extracted financial data · Quality Score: {analysis.data_quality_score:.0f}/100", 30, "completed")
 
         # Step 3: Fraud

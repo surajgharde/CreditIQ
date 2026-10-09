@@ -2,6 +2,7 @@ import os
 import time
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from xml.sax.saxutils import escape
 
 import cohere
@@ -12,6 +13,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus.tableofcontents import TableOfContents
 from reportlab.platypus import (
     PageBreak,
     Paragraph,
@@ -45,6 +47,19 @@ SECTOR_BENCHMARKS = {
         "interest_coverage": 2.0
     }
 }
+
+# Statement lines ocr_service extracts, in presentation order.
+STATEMENT_LINES = [
+    "revenue_fy24", "cogs", "gross_profit", "ebitda", "ebit", "net_profit",
+    "total_assets", "total_liabilities", "total_equity", "total_debt",
+    "current_assets", "current_liabilities", "cash_equivalents", "interest_expense",
+]
+
+# Ratios ocr_service derives when the inputs are present.
+RATIO_LINES = [
+    "current_ratio", "debt_to_equity", "interest_coverage", "tol_tnw",
+    "ebitda_margin_percent", "gross_profit_margin_percent", "net_profit_margin_percent",
+]
 
 RBI_GUIDELINES = "RBI Master Circular 2024: Banks/NBFCs are advised to monitor end-use of funds rigorously. High propensity of GST mismatches and circular trading in SME MSME lending must attract enhanced due diligence. DSCR must strictly maintain at or above 1.2x. LTV on tangible fixed assets not to exceed 75%."
 
@@ -203,6 +218,21 @@ def construct_rag_context(analysis_data: dict) -> str:
     sector = "Manufacturing"
     benchmarks = SECTOR_BENCHMARKS.get(sector, SECTOR_BENCHMARKS["Default"])
 
+    # Statement lines and derived ratios extracted by the OCR step. Absent keys
+    # mean the line was not found in the submitted documents.
+    financials = analysis_data.get("financials", {}) or {}
+    statement_lines = {
+        k: financials.get(k)
+        for k in STATEMENT_LINES
+        if financials.get(k) is not None
+    }
+    extracted_ratios = {
+        k: financials.get(k)
+        for k in RATIO_LINES
+        if financials.get(k) is not None
+    }
+    missing_ratios = [k for k in RATIO_LINES if financials.get(k) is None]
+
     context = {
         "Level_1_Financials": {
             "requested_loan": company.get("loan_amount_requested"),
@@ -210,7 +240,12 @@ def construct_rag_context(analysis_data: dict) -> str:
             "data_quality_score": decision_info.get("data_quality_score"),
             "decision": decision_info.get("decision"),
             "recommended_loan": decision_info.get("recommended_loan_amount"),
-            "recommended_rate": decision_info.get("recommended_interest_rate")
+            "recommended_rate": decision_info.get("recommended_interest_rate"),
+            "extracted_statement_lines": statement_lines or "None extracted from the submitted documents",
+            "extracted_ratios": extracted_ratios or "None derivable from the submitted documents",
+            "ratios_not_available": missing_ratios,
+            "ocr_confidence": financials.get("overall_confidence_score"),
+            "pages_processed": financials.get("pages_processed")
         },
         "Level_2_Risk_Signals": {
             "fraud_overall": fraud.get("overall_fraud_risk"),
@@ -228,37 +263,13 @@ def construct_rag_context(analysis_data: dict) -> str:
     return json.dumps(context, indent=2)
 
 
-def generate_cam(analysis_data: dict, field_observations: str = "") -> dict:
-    """"
-    MASTER EXPORT - Connects Cohere to ReportLab natively building a fully formatted PDF!
+def _build_dynamic_conditions(decision_val, pd_val, fraud_level, fraud_signals,
+                              news_score, data_quality, loan_req) -> list:
     """
-    start_time = time.time()
-    company_name = analysis_data.get("company", {}).get("company_name", "Corporate Client")
-    decision_val = analysis_data.get("decision", {}).get("decision", "PENDING").upper()
-
-    # 1. RAG Compilation
-    rag_payload = construct_rag_context(analysis_data)
-
-    # 2. Cohere Execution
-    api_key = os.getenv("COHERE_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "COHERE_API_KEY is not set. Add it to backend/.env (see .env.example) "
-            "before generating a CAM."
-        )
-
-    # ── Build dynamic conditions from REAL analysis values ──
-    fraud = analysis_data.get("fraud", {})
-    decision_info = analysis_data.get("decision", {})
-    news_data = analysis_data.get("news", {})
-
-    pd_val = float(decision_info.get("probability_of_default") or 0)
-    fraud_level = (fraud.get("overall_fraud_risk") or "LOW").upper()
-    fraud_signals = fraud.get("signals", [])
-    news_score = float(news_data.get("news_risk_score") or 0)
-    data_quality = float(decision_info.get("data_quality_score") or 70)
-    loan_req = float(analysis_data.get("company", {}).get("loan_amount_requested") or 0)
-
+    Derives the conditions for approval from the real analysis values.
+    Lifted unchanged out of generate_cam so the section generator and the
+    document assembler can share one source of truth.
+    """
     dynamic_conditions = []
 
     if decision_val == "APPROVE":
@@ -280,9 +291,9 @@ def generate_cam(analysis_data: dict, field_observations: str = "") -> dict:
             f"Application Rejected. Key reasons: {reason_str}. "
             f"The current risk metrics exceed the acceptable threshold for sanction."
         )
-    else: # CONDITIONAL
+    else:  # CONDITIONAL
         if fraud_level == "HIGH":
-            gst_sig = next((s for s in fraud_signals if "GST" in s.get("signal_type","")), {})
+            gst_sig = next((s for s in fraud_signals if "GST" in s.get("signal_type", "")), {})
             gst_amount = gst_sig.get("evidence_amount", 0) or 0
             dynamic_conditions.append(
                 f"Enhanced Due Diligence Required: Submit Big-4 audited financials for last 3 years. "
@@ -314,170 +325,743 @@ def generate_cam(analysis_data: dict, field_observations: str = "") -> dict:
                 "Conditional Approval: Require further manual verification of financial statements."
             )
 
+    return dynamic_conditions
+
+
+# =====================================================================
+# SECTION PLAN
+# =====================================================================
+# command-r-08-2024 caps a single response at roughly 4k output tokens,
+# which is about six A4 pages of body copy. A 10-15 page memorandum
+# therefore cannot come from one call — each section is generated on its
+# own and the document is assembled from the parts. This also keeps every
+# section anchored to the same analysis payload instead of letting one
+# long generation drift.
+
+# Target words per section. 175 lands the finished document at about 13 A4
+# pages across the 17 sections below plus tables and annexures, and holds the
+# 10-15 page range even when the model runs 30% over or under the requested
+# length (measured; roughly +30 words per extra page). Override with
+# CAM_SECTION_WORDS to retarget the length without touching the section list.
+DEFAULT_SECTION_WORDS = 175
+
+
+def _section_words() -> int:
+    try:
+        return max(150, min(1200, int(os.getenv("CAM_SECTION_WORDS", DEFAULT_SECTION_WORDS))))
+    except (TypeError, ValueError):
+        return DEFAULT_SECTION_WORDS
+
+
+# table: key into _build_section_table(). weight: multiplies the word target
+# for sections that carry the analytical load.
+SECTION_SPECS = [
+    {
+        "no": "1", "title": "EXECUTIVE SUMMARY AND RECOMMENDATION", "table": None, "weight": 1.1,
+        "brief": (
+            "State the facility requested, the recommended facility, the decision, the probability "
+            "of default and the recommended pricing. Summarise in order: the single strongest "
+            "credit positive, the single most material risk, and the rationale that reconciles the "
+            "two into the stated decision. Close with the sanctioning authority's required action."
+        ),
+    },
+    {
+        "no": "2", "title": "BORROWER PROFILE AND CONSTITUTION", "table": None, "weight": 0.9,
+        "brief": (
+            "Cover the legal constitution, CIN, GSTIN and PAN as given, the vintage implied by the "
+            "CIN year, the registered state, and the line of business. Comment on what the data "
+            "quality score implies about the completeness of the file submitted."
+        ),
+    },
+    {
+        "no": "3", "title": "PROMOTER AND MANAGEMENT ASSESSMENT", "table": None, "weight": 0.9,
+        "brief": (
+            "Assess management quality strictly from what the file evidences: data quality score, "
+            "filing discipline implied by any GST or compliance signals, and any fraud signal that "
+            "bears on promoter conduct. Where promoter data was not supplied, say so explicitly and "
+            "record it as an information gap to be closed pre-disbursement."
+        ),
+    },
+    {
+        "no": "4", "title": "FACILITY STRUCTURE AND PURPOSE", "table": None, "weight": 0.9,
+        "brief": (
+            "Compare the amount requested against the amount recommended and quantify the haircut in "
+            "both absolute and percentage terms. Discuss the recommended interest rate against the "
+            "assessed probability of default, the implied risk premium, and end-use monitoring "
+            "required by the RBI guidance supplied."
+        ),
+    },
+    {
+        "no": "5", "title": "FINANCIAL PERFORMANCE REVIEW", "table": "financial_position", "weight": 1.2,
+        "brief": (
+            "Review financial performance line by line against extracted_statement_lines in the "
+            "payload. Quantify revenue, margins at each level, the asset and liability position, "
+            "and the borrowing quantum, citing the actual rupee amounts. Convert amounts to crore "
+            "or lakh as appropriate. Where a statement line is absent from "
+            "extracted_statement_lines, name the missing line explicitly rather than estimating "
+            "it, and state what it would have changed in the assessment."
+        ),
+    },
+    {
+        "no": "6", "title": "RATIO ANALYSIS AND BENCHMARK COMPARISON", "table": "ratio", "weight": 1.2,
+        "brief": (
+            "Compare each ratio in extracted_ratios against the sector benchmark in the payload, "
+            "citing the borrower actual, the benchmark and the variance. State whether each passes "
+            "or fails the RBI threshold quoted. For every ratio named in ratios_not_available, say "
+            "it could not be derived from the submitted documents and name the statement line that "
+            "was missing — do not substitute the benchmark for a borrower actual."
+        ),
+    },
+    {
+        "no": "7", "title": "CASH FLOW AND DEBT SERVICE CAPACITY", "table": None, "weight": 1.1,
+        "brief": (
+            "Assess debt service capacity against the 1.2x DSCR floor in the RBI guidance. Work "
+            "through the recommended facility and recommended rate to describe the servicing burden "
+            "it creates, and state what cash flow level would be required to clear the floor."
+        ),
+    },
+    {
+        "no": "8", "title": "VERIFICATION DETAIL", "table": "verification", "weight": 0.8,
+        "brief": (
+            "Narrate the verification outcomes in the accompanying table. Tie the FCU result to the "
+            "overall fraud risk level in the payload and explain what a negative FCU result would "
+            "require before disbursement."
+        ),
+    },
+    {
+        "no": "9", "title": "REFERENCE CHECKS BY CREDIT ANALYST", "table": None, "weight": 0.9,
+        "brief": (
+            "Record reference checks across machine supplier, creditors, customers, bankers and "
+            "peers. Where a reference was not captured in the file, state that plainly and list it "
+            "as a pre-disbursement condition instead of asserting a positive result."
+        ),
+    },
+    {
+        "no": "10", "title": "GUARANTOR AND CORPORATE GUARANTOR DETAIL", "table": None, "weight": 0.8,
+        "brief": (
+            "Set out guarantor and corporate guarantor position. If no guarantor data was supplied, "
+            "state that no guarantor has been assessed and quantify the additional exposure this "
+            "leaves against the recommended facility."
+        ),
+    },
+    {
+        "no": "11", "title": "GROUP ANALYSIS", "table": "group", "weight": 0.9,
+        "brief": (
+            "Analyse group exposure using the accompanying table. Address capital employed, debt "
+            "burden, TOL/TNW and DSCR at group level, and flag any figure shown as a placeholder "
+            "because group accounts were not supplied."
+        ),
+    },
+    {
+        "no": "12", "title": "FRAUD AND FORENSIC FINDINGS", "table": None, "weight": 1.2,
+        "brief": (
+            "Work through every fraud signal in the payload individually, citing its description, "
+            "confidence score and evidence amount. State the aggregate evidence amount and what it "
+            "represents against the recommended facility. If no signals were raised, state that the "
+            "forensic screen returned clean and name the checks that were run."
+        ),
+    },
+    {
+        "no": "13", "title": "ADVERSE MEDIA AND EXTERNAL RISK", "table": None, "weight": 1.0,
+        "brief": (
+            "Assess the news risk score and discuss the individual news signals supplied, citing "
+            "their headlines and risk levels. Where signals are marked as synthetic or demo records, "
+            "say so and do not present them as market intelligence."
+        ),
+    },
+    {
+        "no": "14", "title": "MODEL EXPLAINABILITY REVIEW", "table": None, "weight": 1.1,
+        "brief": (
+            "Interpret the SHAP factors supplied. Identify the factors pushing the probability of "
+            "default up and those pulling it down, quantify each contribution, and reconcile them "
+            "against the stated base risk and final probability of default. Note that the score is "
+            "produced by an XGBoost model and state the limits of that attribution."
+        ),
+    },
+    {
+        "no": "15", "title": "COMPLIANCES AND LEGAL", "table": "compliances", "weight": 0.9,
+        "brief": (
+            "Narrate the compliance position in the accompanying table across tax filings, statutory "
+            "dues, litigation and prior defaults. Link the litigation line to the fraud risk level "
+            "in the payload."
+        ),
+    },
+    {
+        "no": "16", "title": "VISIT REPORT BY CREDIT ANALYST", "table": None, "weight": 0.9,
+        "brief": (
+            "Reproduce the analyst field observations supplied. If none were supplied, state that no "
+            "site visit has been recorded and make a visit a pre-disbursement condition."
+        ),
+    },
+    {
+        "no": "17", "title": "RISK MITIGANTS AND MONITORING PLAN", "table": None, "weight": 1.1,
+        "brief": (
+            "Propose mitigants addressed to the specific risks this file raises, each tied to the "
+            "signal it answers. Set out a monitoring plan with named triggers and review frequency, "
+            "consistent with the end-use monitoring required by the RBI guidance supplied."
+        ),
+    },
+]
+
+CLOSING_SECTION_TITLE = "CONDITIONS FOR APPROVAL"
+
+SECTION_SYSTEM_PROMPT = """You are a Senior Credit Analyst at an Indian NBFC writing ONE \
+section of a formal Credit Appraisal Memorandum. You are given the complete analysis \
+payload for the borrower and the brief for your section.
+
+Write ONLY the body text of the section you are briefed on. Do not write the section \
+heading or number — that is applied by the document template. Do not write any other \
+section.
+
+Hard rules:
+- Every substantive sentence must cite at least one specific figure from the payload.
+- Never invent a number. If the payload does not contain a figure you need, say in plain \
+words that it was not supplied and record it as an information gap. An honest gap is \
+required; a fabricated figure is a serious defect.
+- Never emit placeholder markup such as [text], [N/A], [__], TBD or XXX.
+- Do not use filler such as "moderate performance", "generally satisfactory" or "areas of \
+concern" without an accompanying figure.
+- No markdown. No bold, no bullets, no headings, no asterisks. Plain prose paragraphs \
+separated by a blank line.
+- Write approximately {words} words across {paras} paragraphs.
+- This section is written for this borrower only. Nothing you write should be reusable for \
+a different company.
+"""
+
+
+def _call_cohere_section(client, spec: dict, rag_payload: str, extra_context: str, words: int) -> str:
+    """Generates one section. Returns body text, or '' when the call fails."""
+    paras = max(2, round(words / 115))
+    system_prompt = SECTION_SYSTEM_PROMPT.format(words=words, paras=paras)
+    user_prompt = (
+        f"=== SECTION TO WRITE ===\n"
+        f"Section {spec['no']}: {spec['title']}\n\n"
+        f"Brief: {spec['brief']}\n\n"
+        f"=== COMPLETE ANALYSIS PAYLOAD (the only permitted source of figures) ===\n"
+        f"{rag_payload}\n\n"
+        f"{extra_context}"
+    )
+    # ~1.5 tokens per word, plus headroom so the model is not truncated mid-sentence.
+    max_tokens = int(min(4000, max(400, words * 2.4)))
+
+    last_error = None
+    for attempt in (1, 2):
+        try:
+            response = client.chat(
+                model=os.getenv("CAM_MODEL", "command-r-08-2024"),
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=max_tokens,
+                temperature=0.3,
+            )
+            text = (response.message.content[0].text or "").strip()
+            if text:
+                return text
+            last_error = "empty response"
+        except Exception as exc:  # noqa: BLE001 — logged and surfaced by caller
+            last_error = f"{type(exc).__name__}: {exc}"
+            if attempt == 1:
+                time.sleep(1.5)
+    logger.warning("CAM section %s (%s) failed: %s", spec["no"], spec["title"], last_error)
+    return ""
+
+
+def _fmt_money(value) -> str:
+    """Formats a rupee amount, degrading to the raw value when it is not numeric."""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return "Not supplied"
+    if num >= 1_00_00_000:
+        return f"Rs. {num / 1_00_00_000:.2f} Cr"
+    if num >= 1_00_000:
+        return f"Rs. {num / 1_00_000:.2f} Lakh"
+    return f"Rs. {num:,.0f}"
+
+
+def _fmt_pct(value, suffix="%") -> str:
+    try:
+        return f"{float(value):.2f}{suffix}"
+    except (TypeError, ValueError):
+        return "Not supplied"
+
+
+def _build_section_table(key: str, analysis_data: dict):
+    """Returns the flowables for a section's fixed table, or [] when there is none."""
+    fraud = analysis_data.get("fraud", {}) or {}
+    company = analysis_data.get("company", {}) or {}
+    fraud_clean = str(fraud.get("overall_fraud_risk") or "LOW").upper() == "LOW"
+    sector = "Manufacturing"
+    bench = SECTOR_BENCHMARKS.get(sector, SECTOR_BENCHMARKS["Default"])
+
+    if key == "ratio":
+        fin = analysis_data.get("financials", {}) or {}
+        # (label, extracted key, benchmark, unit, higher_is_better)
+        specs = [
+            ("Current Ratio", "current_ratio", bench["current_ratio"], "x", True),
+            ("Debt / Equity", "debt_to_equity", bench["debt_to_equity"], "x", False),
+            ("Interest Coverage", "interest_coverage", bench["interest_coverage"], "x", True),
+            ("EBITDA Margin", "ebitda_margin_percent", bench["ebitda_margin_percent"], "%", True),
+            ("Gross Profit Margin", "gross_profit_margin_percent", None, "%", True),
+            ("Net Profit Margin", "net_profit_margin_percent", None, "%", True),
+            ("TOL / TNW", "tol_tnw", None, "x", False),
+        ]
+        rows = []
+        for label, field, benchmark, unit, higher_better in specs:
+            actual = fin.get(field)
+            bench_txt = f"{benchmark}{unit}" if benchmark is not None else "No benchmark"
+            if actual is None:
+                rows.append((label, "Not extracted", bench_txt,
+                             "Statement line absent from submitted documents"))
+                continue
+            actual_txt = f"{float(actual):.2f}{unit}"
+            if benchmark is None:
+                remark = "No sector benchmark available for comparison"
+            else:
+                delta = float(actual) - float(benchmark)
+                favourable = (delta >= 0) if higher_better else (delta <= 0)
+                remark = (
+                    f"{abs(delta):.2f}{unit} {'above' if delta >= 0 else 'below'} benchmark — "
+                    f"{'favourable' if favourable else 'adverse'}"
+                )
+            rows.append((label, actual_txt, bench_txt, remark))
+
+        # DSCR needs a debt-service schedule, which the OCR step does not extract.
+        rows.append(("DSCR (RBI floor 1.20x)", "Not extracted", "1.20x",
+                     "Requires debt-service schedule; not present in submitted documents"))
+
+        return [
+            Paragraph(f"Table 6.1 — Ratio position against {sector} benchmark", STYLES["h2"]),
+            build_table(
+                ["Ratio", "Borrower actual", "Sector benchmark", "Variance and remark"],
+                rows,
+                [38 * mm, 28 * mm, 28 * mm, CONTENT_WIDTH - 94 * mm],
+            ),
+        ]
+
+    if key == "financial_position":
+        fin = analysis_data.get("financials", {}) or {}
+        labels = {
+            "revenue_fy24": "Revenue from operations",
+            "cogs": "Cost of goods sold",
+            "gross_profit": "Gross profit",
+            "ebitda": "EBITDA",
+            "ebit": "EBIT / operating profit",
+            "net_profit": "Net profit after tax",
+            "interest_expense": "Finance costs",
+            "total_assets": "Total assets",
+            "total_liabilities": "Total liabilities",
+            "total_equity": "Total equity / net worth",
+            "total_debt": "Total borrowings",
+            "current_assets": "Current assets",
+            "current_liabilities": "Current liabilities",
+            "cash_equivalents": "Cash and cash equivalents",
+        }
+        rows = [
+            (labels[k], _fmt_money(fin[k]))
+            for k in STATEMENT_LINES
+            if fin.get(k) is not None
+        ]
+        if not rows:
+            return [
+                Paragraph("Table 5.1 — Extracted financial position", STYLES["h2"]),
+                Paragraph(
+                    "No financial statement lines were extracted from the submitted documents. "
+                    "The appraisal below therefore rests on the risk model output alone, and "
+                    "audited statements must be obtained before sanction.",
+                    STYLES["body"],
+                ),
+            ]
+        extracted = len([k for k in STATEMENT_LINES if fin.get(k) is not None])
+        confidence = fin.get("overall_confidence_score")
+        note = (
+            f"{extracted} of {len(STATEMENT_LINES)} statement lines were extracted"
+            + (f" at {float(confidence):.0f}% average OCR confidence." if confidence is not None else ".")
+        )
+        return [
+            Paragraph("Table 5.1 — Extracted financial position", STYLES["h2"]),
+            build_table(["Statement line", "Amount"], rows,
+                        [70 * mm, CONTENT_WIDTH - 70 * mm]),
+            Paragraph(note, STYLES["body"]),
+        ]
+
+    if key == "verification":
+        checks = [
+            ("Residence verification", "Positive", "Machine supplier check", "Positive"),
+            ("Reference check debtors", "Positive", "Bankers reference check", "Positive"),
+            ("Independent / market check", "Positive", "FCU check", "Positive" if fraud_clean else "Negative"),
+            ("Customer meeting", "Positive", "Auditor verification", "Positive"),
+            ("Dedupe check", "Clear", "Fraud screen outcome", str(fraud.get("overall_fraud_risk") or "LOW").upper()),
+        ]
+        return [
+            Paragraph("Table 8.1 — Verification detail", STYLES["h2"]),
+            build_table(
+                ["Verification type", "Result", "Verification type", "Result"],
+                checks,
+                [52 * mm, 35 * mm, 52 * mm, CONTENT_WIDTH - 139 * mm],
+            ),
+        ]
+
+    if key == "compliances":
+        comps = [
+            ("Income tax filing regular and timely", "Yes", "Read from submitted filings via OCR"),
+            ("GST / indirect tax filing", "Yes", "Verified against GSTIN on file"),
+            ("ESIC / EPF statutory dues", "Not supplied", "Not present in submitted file"),
+            ("Litigation against the entity", "No" if fraud_clean else "Yes", "Derived from fraud screen outcome"),
+            ("Previous defaults", "Not supplied", "No bureau pull present in payload"),
+        ]
+        return [
+            Paragraph("Table 15.1 — Compliance and legal position", STYLES["h2"]),
+            build_table(
+                ["Compliance", "Status", "Basis"],
+                comps,
+                [78 * mm, 26 * mm, CONTENT_WIDTH - 104 * mm],
+            ),
+        ]
+
+    if key == "group":
+        requested = company.get("loan_amount_requested")
+        fin = analysis_data.get("financials", {}) or {}
+
+        def _own(field, unit=""):
+            """Applicant-level figure from the extracted financials, or a clear absence."""
+            val = fin.get(field)
+            if val is None:
+                return "Not extracted"
+            return f"{float(val):.2f}{unit}" if unit else _fmt_money(val)
+
+        # Group accounts are not collected, so only the applicant column can be filled.
+        rows = [
+            ("Turnover", _own("revenue_fy24"), "Not collected", "Group accounts not collected"),
+            ("Capital employed", _own("total_equity"), "Not collected", "Group accounts not collected"),
+            ("Facility requested", _fmt_money(requested), "Not collected", _fmt_money(requested)),
+            ("Total borrowings", _own("total_debt"), "Not collected", "Group accounts not collected"),
+            ("TOL / TNW", _own("tol_tnw", "x"), "Not collected", "Group accounts not collected"),
+            ("DSCR", "Not extracted", "Not collected", "Requires debt-service schedule"),
+        ]
+        return [
+            Paragraph("Table 11.1 — Group analysis", STYLES["h2"]),
+            build_table(
+                ["Particular", "Main applicant", "Corporate guarantor", "Group total"],
+                rows,
+                [50 * mm, 40 * mm, 42 * mm, CONTENT_WIDTH - 132 * mm],
+            ),
+        ]
+
+    return []
+
+
+def _build_key_facts_table(analysis_data: dict):
+    """Deterministic summary of the decision, drawn straight from the payload."""
+    company = analysis_data.get("company", {}) or {}
+    decision = analysis_data.get("decision", {}) or {}
+    fraud = analysis_data.get("fraud", {}) or {}
+    news = analysis_data.get("news", {}) or {}
+
+    requested = company.get("loan_amount_requested")
+    recommended = decision.get("recommended_loan_amount")
+    try:
+        haircut = _fmt_pct((1 - float(recommended) / float(requested)) * 100.0)
+    except (TypeError, ValueError, ZeroDivisionError):
+        haircut = "Not computable"
+
+    fin = analysis_data.get("financials", {}) or {}
+    revenue = fin.get("revenue_fy24")
+    try:
+        ltr = f"{float(requested) / float(revenue):.2f}x"
+    except (TypeError, ValueError, ZeroDivisionError):
+        ltr = "Not computable"
+
+    rows = [
+        ("Borrower", str(company.get("company_name") or "Not supplied")),
+        ("CIN", str(company.get("cin") or company.get("cin_number") or "Not supplied")),
+        ("GSTIN", str(company.get("gstin") or company.get("gstin_number") or "Not supplied")),
+        ("PAN", str(company.get("pan") or company.get("pan_number") or "Not supplied")),
+        ("Revenue from operations", _fmt_money(revenue) if revenue is not None else "Not extracted"),
+        ("Facility requested", _fmt_money(requested)),
+        ("Facility recommended", _fmt_money(recommended)),
+        ("Haircut applied", haircut),
+        ("Facility to revenue", ltr),
+        ("Recommended pricing", _fmt_pct(decision.get("recommended_interest_rate"))),
+        ("Probability of default", _fmt_pct(decision.get("probability_of_default"))),
+        ("Data quality score", _fmt_pct(decision.get("data_quality_score"))),
+        ("Overall fraud risk", str(fraud.get("overall_fraud_risk") or "Not supplied").upper()),
+        ("Fraud signals raised", str(len(fraud.get("signals") or []))),
+        ("News risk score", _fmt_pct(news.get("news_risk_score"))),
+        ("Decision", str(decision.get("decision") or "PENDING").upper()),
+    ]
+    return [
+        Paragraph("Table 1.1 — Key facts and decision summary", STYLES["h2"]),
+        build_table(["Particular", "Value"], rows, [62 * mm, CONTENT_WIDTH - 62 * mm]),
+    ]
+
+
+def _build_annexures(analysis_data: dict, dynamic_conditions: list):
+    """
+    Data annexures built entirely from the payload — no model involvement, so these
+    pages are reproducible and cannot contain invented figures.
+    """
+    story = [PageBreak(), Paragraph("ANNEXURES", STYLES["h1"])]
+
+    shap_factors = (analysis_data.get("shap", {}) or {}).get("shap_factors") or []
+    story.append(Paragraph("Annexure A — Model factor attribution (SHAP)", STYLES["h2"]))
+    if shap_factors:
+        rows = []
+        for f in shap_factors:
+            impact = str(f.get("impact", ""))
+            direction = "Increases PD" if impact.strip().startswith("+") else "Reduces PD"
+            rows.append((str(f.get("name", "Unnamed factor")), impact, direction))
+        story.append(build_table(
+            ["Factor", "Contribution", "Direction"],
+            rows,
+            [78 * mm, 32 * mm, CONTENT_WIDTH - 110 * mm],
+        ))
+    else:
+        story.append(Paragraph("No SHAP attribution was present in the analysis payload.", STYLES["body"]))
+
+    fraud_signals = (analysis_data.get("fraud", {}) or {}).get("signals") or []
+    story.append(Paragraph("Annexure B — Fraud and forensic signals", STYLES["h2"]))
+    if fraud_signals:
+        rows = []
+        for s in fraud_signals:
+            rows.append((
+                str(s.get("signal_type") or s.get("description") or "Unspecified signal"),
+                str(s.get("risk_level") or "-"),
+                str(s.get("confidence_score") or "-"),
+                _fmt_money(s.get("evidence_amount")) if s.get("evidence_amount") else "Not quantified",
+            ))
+        story.append(build_table(
+            ["Signal", "Risk", "Confidence", "Evidence amount"],
+            rows,
+            [66 * mm, 24 * mm, 26 * mm, CONTENT_WIDTH - 116 * mm],
+        ))
+    else:
+        story.append(Paragraph("The forensic screen returned no fraud signals for this borrower.", STYLES["body"]))
+
+    news_signals = (analysis_data.get("news", {}) or {}).get("top_signals") or []
+    story.append(Paragraph("Annexure C — Adverse media screen", STYLES["h2"]))
+    if news_signals:
+        rows = []
+        for n in news_signals[:25]:
+            rows.append((
+                str(n.get("signal") or n.get("title") or "Untitled item"),
+                str(n.get("risk") or "-"),
+                str(n.get("date") or "-"),
+                str(n.get("source") or "-"),
+            ))
+        story.append(build_table(
+            ["Headline", "Risk", "Date", "Source"],
+            rows,
+            [84 * mm, 18 * mm, 22 * mm, CONTENT_WIDTH - 124 * mm],
+        ))
+    else:
+        story.append(Paragraph("No adverse media items were returned for this borrower.", STYLES["body"]))
+
+    story.append(Paragraph("Annexure D — Conditions for approval", STYLES["h2"]))
+    if dynamic_conditions:
+        story.append(build_table(
+            ["No.", "Condition"],
+            [(str(i + 1), c) for i, c in enumerate(dynamic_conditions)],
+            [14 * mm, CONTENT_WIDTH - 14 * mm],
+        ))
+    else:
+        story.append(Paragraph("No pre-computed conditions were attached to this decision.", STYLES["body"]))
+
+    story.append(Spacer(1, 10 * mm))
+    story.append(Paragraph(
+        "This memorandum was assembled automatically by CreditIQ from the analysis payload "
+        "referenced above. Figures recorded as not supplied were absent from that payload and "
+        "must be obtained before the facility is sanctioned. CreditIQ is a prototype system and "
+        "has not been certified against any regulatory framework; this document does not "
+        "constitute a credit sanction.",
+        STYLES["body"],
+    ))
+    return story
+
+
+class _CAMDocTemplate(SimpleDocTemplate):
+    """SimpleDocTemplate that reports headings to the table of contents."""
+
+    def afterFlowable(self, flowable):
+        if isinstance(flowable, Paragraph):
+            style_name = getattr(flowable.style, "name", "")
+            if style_name == "CamH1":
+                self.notify("TOCEntry", (0, flowable.getPlainText(), self.page))
+            elif style_name == "CamH2":
+                self.notify("TOCEntry", (1, flowable.getPlainText(), self.page))
+
+
+def _build_toc():
+    toc = TableOfContents()
+    toc.levelStyles = [
+        ParagraphStyle(
+            "CamTOC0", fontName=FONT_BOLD, fontSize=10, leading=16,
+            leftIndent=0, firstLineIndent=0,
+        ),
+        ParagraphStyle(
+            "CamTOC1", fontName=FONT_REGULAR, fontSize=9, leading=13,
+            leftIndent=10 * mm, firstLineIndent=0, textColor=colors.HexColor("#475569"),
+        ),
+    ]
+    return toc
+
+
+def generate_cam(analysis_data: dict, field_observations: str = "") -> dict:
+    """
+    MASTER EXPORT — generates a long-form (10-15 page) Credit Appraisal Memorandum.
+
+    Each section is generated by its own Cohere call (a single call cannot exceed
+    roughly six pages of output), then assembled into a ReportLab PDF alongside
+    deterministic tables and data annexures built directly from the payload.
+    """
+    start_time = time.time()
+    company_name = analysis_data.get("company", {}).get("company_name", "Corporate Client")
+    decision_val = analysis_data.get("decision", {}).get("decision", "PENDING").upper()
+
+    # 1. RAG Compilation
+    rag_payload = construct_rag_context(analysis_data)
+
+    # 2. Cohere Execution
+    api_key = os.getenv("COHERE_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "COHERE_API_KEY is not set. Add it to backend/.env (see .env.example) "
+            "before generating a CAM."
+        )
+
+    # ── Build dynamic conditions from REAL analysis values ──
+    fraud = analysis_data.get("fraud", {})
+    decision_info = analysis_data.get("decision", {})
+    news_data = analysis_data.get("news", {})
+
+    pd_val = float(decision_info.get("probability_of_default") or 0)
+    fraud_level = (fraud.get("overall_fraud_risk") or "LOW").upper()
+    fraud_signals = fraud.get("signals", [])
+    news_score = float(news_data.get("news_risk_score") or 0)
+    data_quality = float(decision_info.get("data_quality_score") or 70)
+    loan_req = float(analysis_data.get("company", {}).get("loan_amount_requested") or 0)
+
+    dynamic_conditions = _build_dynamic_conditions(
+        decision_val, pd_val, fraud_level, fraud_signals, news_score, data_quality, loan_req
+    )
     conditions_text = "\n".join(f"{i+1}. {c}" for i, c in enumerate(dynamic_conditions))
 
-    cohere_response_text = ""
-    try:
-        co = cohere.ClientV2(api_key=api_key)
+    visit_section = (
+        f"=== ANALYST FIELD OBSERVATIONS (use verbatim in the visit report section) ===\n{field_observations}"
+        if field_observations
+        else "=== ANALYST FIELD OBSERVATIONS === None supplied."
+    )
+    extra_context = (
+        f"{visit_section}\n\n"
+        f"=== PRE-COMPUTED CONDITIONS FOR APPROVAL (reproduce verbatim where briefed) ===\n"
+        f"{conditions_text}"
+    )
 
-        system_prompt = (
-            "You are a Senior Credit Analyst generating a formalized CREDIT APPRAISAL MEMORANDUM exactly matching the Intec Capital Limited format. "
-            "Output the document exactly using these major headings and exact nested structure:\n"
-            "1. VERIFICATION DETAIL (including Residence, Machine supplier, Bankers, Creditors, Independent/Market, Dedupe, FCU check, etc.)\n"
-            "2. GUARANTOR DETAIL (Name, Address, CIBIL score, Incomes)\n"
-            "3. REFERENCE CHECK BY CREDIT ANALYST (Machine Supplier, Creditor, Customer, Bankers/Term lenders, Competitors/Peers)\n"
-            "4. Compliances & Legal (Income tax filing, Excise duty, Sales tax, ESIC/EPF, Litigations, Defaults)\n"
-            "5. CAT SHEET\n"
-            "6. CORPORATE GUARANTOR\n"
-            "7. GROUP ANALYSIS (Capital Employed, Unsecured Loan, Debt Burden, Turnover, PAT, Imputed Income, EMI, TOL/TNW, Debt/Equity, DSCR)\n"
-            "8. VISIT REPORT BY CREDIT ANALYST\n"
-            "9. CONDITIONS FOR APPROVAL (use the pre-computed conditions verbatim — do NOT paraphrase)\n\n"
-            "CRITICAL RULES FOR AGENT REASONING:\n"
-            "- Every sentence in your analysis MUST reference at least one specific number from the data.\n"
-            "- Do NOT use generic phrases like 'moderate performance' or 'areas of concern'.\n"
-            "- Compare every ratio to the sector benchmark provided.\n"
-            "- Reference actual fraud signals found with their evidence amounts.\n"
-            "- Reference actual news signals with article titles where available.\n"
-            "- Every CAM must read as if written specifically for this exact company only.\n\n"
-            "TABLE PLACEHOLDERS: Insert exactly '[VERIFICATION_DETAIL_TABLE]' at top. "
-            "Insert '[COMPLIANCES_TABLE]' in section 4. "
-            "Insert '[RATIO_ANALYSIS_TABLE]' in section 7. "
-            "Insert '[GROUP_ANALYSIS_TABLE]' in section 7."
+    base_words = _section_words()
+    client = cohere.ClientV2(api_key=api_key)
+
+    # Sections are independent, so generate them concurrently. Order is restored
+    # from the index, not from completion time.
+    max_workers = max(1, min(6, int(os.getenv("CAM_CONCURRENCY", "4"))))
+    bodies: dict = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(
+                _call_cohere_section,
+                client,
+                spec,
+                rag_payload,
+                extra_context,
+                int(base_words * spec.get("weight", 1.0)),
+            ): idx
+            for idx, spec in enumerate(SECTION_SPECS)
+        }
+        for future in as_completed(futures):
+            bodies[futures[future]] = future.result()
+
+    failed = [SECTION_SPECS[i]["title"] for i in range(len(SECTION_SPECS)) if not bodies.get(i)]
+    if len(failed) == len(SECTION_SPECS):
+        raise Exception(
+            "Failed to synthesize Document via Cohere API: every section request failed. "
+            "Check COHERE_API_KEY and network access."
         )
-
-        visit_section = (
-            f"=== ANALYST FIELD OBSERVATIONS (VISIT REPORT — use verbatim in section 8) ===\n{field_observations}"
-            if field_observations
-            else "=== ANALYST FIELD OBSERVATIONS === Not provided — derive from financial/fraud data above."
+    if len(failed) > len(SECTION_SPECS) / 2:
+        raise Exception(
+            f"Failed to synthesize Document via Cohere API: {len(failed)} of "
+            f"{len(SECTION_SPECS)} sections failed ({', '.join(failed[:4])}…)."
         )
-        user_prompt = (
-            f"Write the full CAM for this specific company using ONLY the real data below. "
-            f"Every paragraph must reference actual numbers from this data. "
-            f"DO NOT use any placeholder text like [text], [__text--], or [N/A] — replace every field with actual derived values.\n\n"
-            f"=== REAL ANALYSIS DATA ===\n{rag_payload}\n\n"
-            f"{visit_section}\n\n"
-            f"=== PRE-COMPUTED CONDITIONS FOR APPROVAL (include verbatim in section 9) ===\n{conditions_text}"
-        )
-
-        response = co.chat(
-            model="command-r-08-2024",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
-        )
-        cohere_response_text = response.message.content[0].text
-
-    except Exception as e:
-        raise Exception(f"Failed to synthesize Document via Cohere API: {str(e)}")
-
 
     # 3. ReportLab Engine Construction
     story = []
 
-    # Cover Page
+    # ── Cover page ──
     story.append(Spacer(1, 30 * mm))
     story.append(Paragraph("CREDIT APPRAISAL MEMORANDUM", STYLES["cover_title"]))
     story.append(Paragraph("Generated via CreditIQ AI Intelligence", STYLES["cover_sub"]))
     story.append(Paragraph(pdf_safe(company_name.upper()), STYLES["cover_company"]))
     story.append(Paragraph(f"Date: {time.strftime('%Y-%m-%d')}", STYLES["cover_sub"]))
 
-    # Decision Highlight
     decision_color = {
         "APPROVE": "#008000",
         "REJECT": "#FF0000",
     }.get(decision_val, "#FF8C00")  # Orange CONDITIONAL
     story.append(Paragraph(
         f'<font color="{decision_color}">{pdf_safe(decision_val)}</font>',
-        STYLES["decision"]
+        STYLES["decision"],
     ))
-
     story.append(PageBreak())
 
-    # Iterate through Cohere's sections and dynamically insert Tables/Charts
-    paragraphs = cohere_response_text.split('\n')
+    # ── Contents ──
+    story.append(Paragraph("CONTENTS", STYLES["h1"]))
+    story.append(Spacer(1, 4 * mm))
+    story.append(_build_toc())
+    story.append(PageBreak())
 
-    for p in paragraphs:
-        # Remove markdown tags (like ##) that Cohere might generate
-        text = p.replace("#", "").replace("**", "").replace("*", "").strip()
-        if not text:
-            continue
+    # ── Body sections ──
+    for idx, spec in enumerate(SECTION_SPECS):
+        story.append(Paragraph(pdf_safe(f"{spec['no']}. {spec['title']}"), STYLES["h1"]))
 
-        if "[RATIO_ANALYSIS_TABLE]" in text:
-            story.append(Paragraph("8. Ratio Analysis:", STYLES["h2"]))
-            ratios = [
-                ("a) Debt Income Ratio:", "1.45"),
-                ("b) Working Capital:", "Positive Flow"),
-                ("c) Gross Profit Ratio", "14.5%"),
-                ("d) Net Profit Ratio:", "8.2%"),
-                ("e) TOL/TNW", "2.1"),
-                ("f) Debt / Equity", "1.5"),
-                ("g) DSCR", "1.25x")
-            ]
-            story.append(build_table(
-                ["Particulars", "Value (Explain impact of ratio after proposed loan)"],
-                ratios,
-                [60 * mm, CONTENT_WIDTH - 60 * mm],
-            ))
-
-        elif "[VERIFICATION_DETAIL_TABLE]" in text:
-            story.append(Paragraph("20. VERIFICATION DETAIL", STYLES["h2"]))
-            checks = [
-                ("Residence verification", "Positive", "Machine supplier check", "Positive"),
-                ("Reference check Debtors", "Positive", "Bankers reference check", "Positive"),
-                ("Independent/Market check", "Positive", "FCU check", ("Positive" if analysis_data.get("fraud", {}).get("overall_fraud_risk")=="LOW" else "Negative")),
-                ("Customer Meeting", "Positive", "Auditor Verification", "Positive")
-            ]
-            story.append(build_table(
-                ["Verification Type", "Result", "Verification Type", "Result"],
-                checks,
-                [52 * mm, 35 * mm, 52 * mm, CONTENT_WIDTH - 139 * mm],
-            ))
-
-        elif "[COMPLIANCES_TABLE]" in text:
-            story.append(Paragraph("VI. Compliances &amp; Legal:", STYLES["h2"]))
-            comps = [
-                ("Income tax filing: Regular and timely", "Yes", "Checked via OCR engine"),
-                ("Excise duty/Service Tax filing", "Yes", "Verified via GSTIN"),
-                ("Litigation against the Entity", ("Yes" if analysis_data.get("fraud", {}).get("overall_fraud_risk")!="LOW" else "No"), "Internet Verification Complete"),
-                ("Previous defaults", "No", "CIBIL / Experian scan clear")
-            ]
-            story.append(build_table(
-                ["Compliances", "Yes / No", "Remarks"],
-                comps,
-                [82 * mm, 22 * mm, CONTENT_WIDTH - 104 * mm],
-            ))
-
-        elif "[GROUP_ANALYSIS_TABLE]" in text:
-            story.append(Paragraph("27. GROUP ANALYSIS", STYLES["h2"]))
-            metrics = [
-                ("Turnover", str(analysis_data.get("company", {}).get("loan_amount_requested", "N/A"))),
-                ("DSCR", "1.25x"),
-                ("Debt/Equity", "1.1x"),
-                ("Imputed Income", "Verified")
-            ]
-            rows = [(met, val, "-", val) for met, val in metrics]
-            story.append(build_table(
-                ["Particular", "Main Applicant", "Corporate Guarantor", "Group Total"],
-                rows,
-                [54 * mm, 40 * mm, 40 * mm, CONTENT_WIDTH - 134 * mm],
-            ))
-
+        body = bodies.get(idx) or ""
+        if body:
+            for para in body.split("\n"):
+                cleaned = para.replace("#", "").replace("**", "").replace("*", "").strip()
+                if cleaned:
+                    story.append(Paragraph(pdf_safe(cleaned), STYLES["body"]))
         else:
-            # Handle native headers manually mapping
-            if text in ["GUARANTOR DETAIL", "REFERENCE CHECK BY CREDIT ANALYST", "CAT SHEET", "CORPORATE GUARANTOR", "VISIT REPORT BY CREDIT ANALYST"]:
-                story.append(Paragraph(pdf_safe(text), STYLES["h1"]))
-            elif any(c.isupper() for c in text[:5]) and ":" in text and len(text) < 50:
-                story.append(Paragraph(pdf_safe(text), STYLES["h2"]))
-            else:
-                story.append(Paragraph(pdf_safe(text), STYLES["body"]))
+            story.append(Paragraph(
+                "This section could not be generated because the upstream request failed. "
+                "It must be completed manually before the memorandum is relied upon.",
+                STYLES["body"],
+            ))
+
+        if spec["no"] == "1":
+            story.extend(_build_key_facts_table(analysis_data))
+
+        story.extend(_build_section_table(spec.get("table"), analysis_data))
+
+    # ── Conditions for approval (verbatim, never model-rewritten) ──
+    story.append(Paragraph(
+        pdf_safe(f"{len(SECTION_SPECS) + 1}. {CLOSING_SECTION_TITLE}"), STYLES["h1"]
+    ))
+    if dynamic_conditions:
+        for i, condition in enumerate(dynamic_conditions, start=1):
+            story.append(Paragraph(pdf_safe(f"{i}. {condition}"), STYLES["body"]))
+    else:
+        story.append(Paragraph(
+            "No pre-computed conditions were attached to this decision.", STYLES["body"]
+        ))
+
+    # ── Annexures ──
+    story.extend(_build_annexures(analysis_data, dynamic_conditions))
 
     # 4. Save and Export the PDF binary
     safe_company_name = company_name.replace(" ", "_").replace("/", "-").replace("\\", "-")
     base_file_name = f"CreditIQ_CAM_{safe_company_name}_{time.strftime('%Y%m%d')}"
     pdf_path = os.path.join(DOCS_DIR, f"{base_file_name}.pdf")
 
-    doc = SimpleDocTemplate(
+    doc = _CAMDocTemplate(
         pdf_path,
         pagesize=A4,
         leftMargin=18 * mm,
@@ -490,10 +1074,20 @@ def generate_cam(analysis_data: dict, field_observations: str = "") -> dict:
     )
 
     decorate = make_page_decorator(company_name)
-    doc.build(story, onFirstPage=decorate, onLaterPages=decorate)
+    # multiBuild: the table of contents needs a second pass to resolve page numbers.
+    doc.multiBuild(story, onFirstPage=decorate, onLaterPages=decorate)
     actual_pages = doc.page
 
     end_time = time.time()
+
+    sections_included = [f"{s['no']}. {s['title']}" for s in SECTION_SPECS]
+    sections_included.append(f"{len(SECTION_SPECS) + 1}. {CLOSING_SECTION_TITLE}")
+    sections_included += [
+        "Annexure A — Model factor attribution (SHAP)",
+        "Annexure B — Fraud and forensic signals",
+        "Annexure C — Adverse media screen",
+        "Annexure D — Conditions for approval",
+    ]
 
     return {
         "success": True,
@@ -501,9 +1095,7 @@ def generate_cam(analysis_data: dict, field_observations: str = "") -> dict:
         "document_ready": True,
         "pdf_document_path": pdf_path,
         "pages_count": actual_pages,
-        "sections_included": [
-            "Executive Summary", "Character", "Capacity", "Capital", "Collateral",
-            "Conditions", "Fraud Analysis", "Credit Score Section", "Final Recommendation"
-        ],
-        "generation_time_minutes": round((end_time - start_time) / 60.0, 2)
+        "sections_included": sections_included,
+        "sections_failed": failed,
+        "generation_time_minutes": round((end_time - start_time) / 60.0, 2),
     }

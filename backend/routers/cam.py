@@ -61,6 +61,13 @@ async def generate_cam_document(analysis_id: int, body: CAMRequest = CAMRequest(
         with open(results_file, "r") as f:
             results_data = json.load(f)
 
+    # Extracted statement lines and derived ratios, written by the OCR step.
+    financials_data = {}
+    financials_file = f"data/financials_{analysis.id}.json"
+    if os.path.exists(financials_file):
+        with open(financials_file, "r") as f:
+            financials_data = json.load(f)
+
     decision_info = results_data.get("recommendation", {})
     shap_info = results_data.get("shap", {})
     
@@ -93,7 +100,8 @@ async def generate_cam_document(analysis_id: int, body: CAMRequest = CAMRequest(
             "conditions": decision_info.get("conditions", []),
             "recommended_loan_amount": analysis.recommended_loan_amount,
             "recommended_interest_rate": analysis.recommended_interest_rate
-        }
+        },
+        "financials": financials_data
     }
     
     try:
