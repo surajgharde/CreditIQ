@@ -243,3 +243,12 @@
     opacity: 0.65;
     font-style: italic;
 }
+
+/* Borrower the panel is grounded in, under the title. */
+.chatbot-scope {
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 500;
+    opacity: 0.8;
+    margin-top: 1px;
+}

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, type Variants } from 'framer-motion';
 import { ArrowRight, PlayCircle, Shield, ChevronDown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -7,12 +7,16 @@ interface HeroSectionProps {
   onScrollTo: (id: string) => void;
 }
 
-const fadeUp = {
+// A bezier curve must be a 4-tuple for framer-motion's Easing type; an array
+// literal widens to number[] and no longer satisfies it.
+const EASE_OUT: [number, number, number, number] = [0.16, 1, 0.3, 1];
+
+const fadeUp: Variants = {
   hidden: { opacity: 0, y: 30 },
   visible: (delay = 0) => ({
     opacity: 1,
     y: 0,
-    transition: { duration: 0.7, ease: [0.16, 1, 0.3, 1], delay },
+    transition: { duration: 0.7, ease: EASE_OUT, delay },
   }),
 };
 

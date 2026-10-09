@@ -3,6 +3,7 @@ import { Building2, Check, Loader2, Lightbulb, AlertTriangle, Terminal, Clock, F
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { connectAnalysisWebSocket, type WSMessage } from '../services/analysisApi';
 import './Analysis.css';
+import { isDemoInput, normaliseDemoInput, DEMO_HINTS } from '../services/demoAccounts';
 
 // Pre-define the 6 numbers so we always show the full ladder
 const STEP_NUMBERS = [1, 2, 3, 4, 5, 6];
@@ -28,10 +29,9 @@ function Analysis() {
   const [demoError, setDemoError] = useState('');
 
   const handleVerifyAndView = () => {
-    const input = demoInput.trim().toUpperCase();
-    const validInputs = ['AAACB1234M', '45678219304', 'AAACM5678L', '58923104765', 'AAACI6789N', '67289103452'];
-    
-    if (validInputs.includes(input)) {
+    const input = normaliseDemoInput(demoInput);
+    // Gate and dashboard read the same list, so an accepted input always resolves.
+    if (isDemoInput(input)) {
       setDemoError('');
       setShowDemoModal(false);
       navigate(`/dashboard?id=${analysisId}&demo=${input}`);
@@ -348,11 +348,21 @@ function Analysis() {
         <div className="demo-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(2px)' }}>
           <div className="demo-modal" style={{ background: '#fff', padding: '2rem', borderRadius: '12px', width: '400px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)' }}>
             <h3 style={{ color: '#115e59', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}><CheckCircle2 size={20} /> Verify Profile</h3>
-            <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.5rem', lineHeight: 1.5 }}>Enter the Account Number or PAN of the company to unlock and decrypt the final Credit Appraisal Memo.</p>
+            <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1rem', lineHeight: 1.5 }}>Enter the Account Number or PAN of the company to unlock and decrypt the final Credit Appraisal Memo.</p>
+
+            <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.7rem 0.8rem', marginBottom: '1.25rem' }}>
+              <div style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#94A3B8', marginBottom: '0.45rem' }}>Demo companies</div>
+              {DEMO_HINTS.map(h => (
+                <div key={h.pan} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', fontSize: '0.74rem', color: '#475569', lineHeight: 1.7 }}>
+                  <span>{h.company} <span style={{ color: '#94A3B8' }}>({h.decision})</span></span>
+                  <span style={{ fontFamily: 'ui-monospace, Menlo, monospace', whiteSpace: 'nowrap' }}>{h.pan}</span>
+                </div>
+              ))}
+            </div>
             
             <input 
               type="text" 
-              placeholder="e.g. AAACB1234M or 45678219304" 
+              placeholder={`e.g. ${DEMO_HINTS[0].pan} or ${DEMO_HINTS[0].accountNumber}`} 
               value={demoInput}
               onChange={(e) => setDemoInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleVerifyAndView()}

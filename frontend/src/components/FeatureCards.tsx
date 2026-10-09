@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+import { motion, type Variants } from 'framer-motion';
 import {
   FileText, AlertTriangle, BarChart3, Newspaper, BookOpen, Shield
 } from 'lucide-react';
@@ -55,9 +55,13 @@ const containerVariants = {
   },
 };
 
-const cardVariants = {
+// A bezier curve must be a 4-tuple for framer-motion's Easing type; an array
+// literal widens to number[] and no longer satisfies it.
+const EASE_OUT: [number, number, number, number] = [0.16, 1, 0.3, 1];
+
+const cardVariants: Variants = {
   hidden: { opacity: 0, y: 24 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.55, ease: [0.16, 1, 0.3, 1] } },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.55, ease: EASE_OUT } },
 };
 
 export default function FeatureCards() {

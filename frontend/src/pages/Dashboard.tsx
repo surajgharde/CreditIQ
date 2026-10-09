@@ -6,6 +6,7 @@ import { downloadCAM } from '../services/camApi';
 import { useApi, Skeleton, ErrorBanner } from '../services/useApi';
 import Chatbot from '../components/Chatbot';
 import './Dashboard.css';
+import { findDemoAccount } from '../services/demoAccounts';
 
 function colorByRisk(r: string) {
   const u = (r || '').toUpperCase();
@@ -26,45 +27,20 @@ function Dashboard() {
   let { data, loading, error: errorMsg } = apiResult;
 
   if (demoParam) {
-    const input = demoParam.trim().toUpperCase();
-    const approveDemo = ['ZZZCS1001A', '45678219304'];
-    const rejectDemo = ['ZZZCZ1002B', '58923104765'];
-    const conditionalDemo = ['ZZZCV1003C', '67289103452'];
+    // Resolved from the shared demo list so the gate in Analysis.tsx and this
+    // lookup can never disagree about which identifiers are valid.
+    const match = findDemoAccount(demoParam);
 
-    let mockData = null;
-    if (approveDemo.includes(input)) {
-      mockData = {
-        company: { company_name: 'Suryanex Industries Limited', cin_number: 'U28990MH2015PTC100001', pan_number: 'ZZZCS1001A' },
-        decision: { decision: 'APPROVE', probability_of_default: 12.5, recommended_loan_amount: 30000000, recommended_interest_rate: 10.5, data_quality_score: 95 },
-        fraud: { overall_fraud_risk: 'LOW', total_signals_found: 0, signals: [] },
-        news: { news_risk_score: 15, top_signals: [] },
-        recommendation: { decision_reasoning: 'Strong financial stability, consistent transactions, no fraud signals.', conditions: [], interest_rate_breakdown: 'Base 8% + Risk Premium 2.5%' },
-        shap: { base_risk: 15, final_pd: 12.5, shap_factors: [{ name: 'Stable Cash Flow', impact: '-1.5' }, { name: 'High Revenue Growth', impact: '-1.0' }] }
-      };
-    } else if (rejectDemo.includes(input)) {
-      mockData = {
-        company: { company_name: 'Zentara Polymers Limited', cin_number: 'U24100MH2012PTC100002', pan_number: 'ZZZCZ1002B' },
-        decision: { decision: 'REJECT', probability_of_default: 85.2, recommended_loan_amount: 0, recommended_interest_rate: 0, data_quality_score: 88 },
-        fraud: { overall_fraud_risk: 'HIGH', total_signals_found: 3, signals: [{ description: 'Suspicious transactions', confidence_score: 92 }, { description: 'GST mismatch', confidence_score: 85 }, { description: 'High liabilities', confidence_score: 78 }] },
-        news: { news_risk_score: 80, top_signals: [{ risk: 'HIGH', signal: 'Negative market sentiment' }] },
-        recommendation: { decision_reasoning: 'Suspicious transactions, GST mismatch, high liabilities.', conditions: [], interest_rate_breakdown: 'N/A' },
-        shap: { base_risk: 15, final_pd: 85.2, shap_factors: [{ name: 'GST Mismatch', impact: '+40.5' }, { name: 'Suspicious Transactions', impact: '+29.7' }] }
-      };
-    } else if (conditionalDemo.includes(input)) {
-      mockData = {
-        company: { company_name: 'Velmora Agritech Limited', cin_number: 'U01100KA2016PTC100003', pan_number: 'ZZZCV1003C' },
-        decision: { decision: 'CONDITIONAL', probability_of_default: 25.4, recommended_loan_amount: 20000000, recommended_interest_rate: 12.5, data_quality_score: 90 },
-        fraud: { overall_fraud_risk: 'MEDIUM', total_signals_found: 1, signals: [{ description: 'Moderate cash flow risk', confidence_score: 65 }] },
-        news: { news_risk_score: 40, top_signals: [] },
-        recommendation: { decision_reasoning: 'Requires verification, moderate cash flow risk, manual review needed.', conditions: ['Submit updated bank statement', 'Manual verification of liabilities'], interest_rate_breakdown: 'Base 8% + Risk Premium 4.5%' },
-        shap: { base_risk: 15, final_pd: 25.4, shap_factors: [{ name: 'Moderate Cash Flow Risk', impact: '+10.4' }] }
-      };
-    }
-
-    if (mockData) {
-      data = mockData;
+    if (match) {
+      // The demo payload mirrors the API response but is not byte-identical to
+      // FullResults (it carries a PAN and a risk level the API type omits).
+      // Going through unknown keeps the conversion explicit without widening
+      // the whole object to any.
+      data = match.results as unknown as typeof data;
       loading = false;
-      errorMsg = null;
+      // useApi types error as string, with '' meaning "no error" — both are
+      // falsy at the call sites, but null does not satisfy the type.
+      errorMsg = '';
     } else {
       loading = false;
       data = null;
@@ -301,7 +277,7 @@ function Dashboard() {
           </button>
         </div>
       </div>
-      <Chatbot />
+      <Chatbot analysisId={demoParam ? undefined : analysisId} companyName={company?.company_name} />
     </div>
   );
 }

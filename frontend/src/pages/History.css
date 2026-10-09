@@ -307,6 +307,8 @@
 .status-success  { background: #DCFCE7; color: #16A34A; }
 .status-processing { background: #ccfbf1; color: #0d9488; }
 .status-fail { background: #FEE2E2; color: #DC2626; cursor: help; }
+/* Scoring finished but a later step (CAM) failed — reason is in the tooltip. */
+.status-partial { background: #FEF3C7; color: #B45309; cursor: help; }
 
 /* Decision pills */
 .decision-pill {

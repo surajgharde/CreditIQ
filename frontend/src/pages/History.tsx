@@ -101,6 +101,9 @@ function History({ hideNavbar = false }: { hideNavbar?: boolean }) {
     const fmtAmount = (n?: number) => n ? `₹${(n / 100000).toFixed(1)} L` : '-';
 
     const getStatusBadge = (status: string, reason?: string) => {
+        // A completed run can still carry a failure reason: scoring succeeded but a
+        // later step (CAM generation) did not. Showing a plain tick there hides it.
+        if (status === 'completed' && reason) return <span className="status-badge status-partial" title={reason}><AlertTriangle size={12}/> Partial</span>;
         if (status === 'completed') return <span className="status-badge status-success"><CheckCircle size={12}/> Completed</span>;
         if (status === 'failed') return <span className="status-badge status-fail" title={reason}><X size={12}/> Failed</span>;
         return <span className="status-badge status-processing"><Loader size={12}/> Processing</span>;

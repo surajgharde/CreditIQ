@@ -2,6 +2,9 @@ import os
 import time
 import json
 import logging
+import threading
+from collections import deque
+from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from xml.sax.saxutils import escape
 
@@ -22,6 +25,8 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+from services import cam_charts
 
 logger = logging.getLogger(__name__)
 
@@ -332,16 +337,15 @@ def _build_dynamic_conditions(decision_val, pd_val, fraud_level, fraud_signals,
 # SECTION PLAN
 # =====================================================================
 # command-r-08-2024 caps a single response at roughly 4k output tokens,
-# which is about six A4 pages of body copy. A 10-15 page memorandum
+# which is about six A4 pages of body copy. A 15-20 page memorandum
 # therefore cannot come from one call — each section is generated on its
 # own and the document is assembled from the parts. This also keeps every
 # section anchored to the same analysis payload instead of letting one
 # long generation drift.
 
 # Target words per section. 175 lands the finished document at about 13 A4
-# pages across the 17 sections below plus tables and annexures, and holds the
-# 10-15 page range even when the model runs 30% over or under the requested
-# length (measured; roughly +30 words per extra page). Override with
+# pages across the 17 sections below plus tables, six figures and annexures.
+# Measured: roughly 30 words per section equals one page. Override with
 # CAM_SECTION_WORDS to retarget the length without touching the section list.
 DEFAULT_SECTION_WORDS = 175
 
@@ -357,7 +361,7 @@ def _section_words() -> int:
 # for sections that carry the analytical load.
 SECTION_SPECS = [
     {
-        "no": "1", "title": "EXECUTIVE SUMMARY AND RECOMMENDATION", "table": None, "weight": 1.1,
+        "no": "1", "title": "EXECUTIVE SUMMARY AND RECOMMENDATION", "table": None, "chart": "risk_position", "weight": 1.1,
         "brief": (
             "State the facility requested, the recommended facility, the decision, the probability "
             "of default and the recommended pricing. Summarise in order: the single strongest "
@@ -383,7 +387,7 @@ SECTION_SPECS = [
         ),
     },
     {
-        "no": "4", "title": "FACILITY STRUCTURE AND PURPOSE", "table": None, "weight": 0.9,
+        "no": "4", "title": "FACILITY STRUCTURE AND PURPOSE", "table": None, "chart": "facility", "weight": 0.9,
         "brief": (
             "Compare the amount requested against the amount recommended and quantify the haircut in "
             "both absolute and percentage terms. Discuss the recommended interest rate against the "
@@ -392,7 +396,7 @@ SECTION_SPECS = [
         ),
     },
     {
-        "no": "5", "title": "FINANCIAL PERFORMANCE REVIEW", "table": "financial_position", "weight": 1.2,
+        "no": "5", "title": "FINANCIAL PERFORMANCE REVIEW", "table": "financial_position", "chart": "financial_position", "weight": 1.2,
         "brief": (
             "Review financial performance line by line against extracted_statement_lines in the "
             "payload. Quantify revenue, margins at each level, the asset and liability position, "
@@ -403,7 +407,7 @@ SECTION_SPECS = [
         ),
     },
     {
-        "no": "6", "title": "RATIO ANALYSIS AND BENCHMARK COMPARISON", "table": "ratio", "weight": 1.2,
+        "no": "6", "title": "RATIO ANALYSIS AND BENCHMARK COMPARISON", "table": "ratio", "chart": "ratio_benchmark", "weight": 1.2,
         "brief": (
             "Compare each ratio in extracted_ratios against the sector benchmark in the payload, "
             "citing the borrower actual, the benchmark and the variance. State whether each passes "
@@ -453,7 +457,7 @@ SECTION_SPECS = [
         ),
     },
     {
-        "no": "12", "title": "FRAUD AND FORENSIC FINDINGS", "table": None, "weight": 1.2,
+        "no": "12", "title": "FRAUD AND FORENSIC FINDINGS", "table": None, "chart": "fraud_signals", "weight": 1.2,
         "brief": (
             "Work through every fraud signal in the payload individually, citing its description, "
             "confidence score and evidence amount. State the aggregate evidence amount and what it "
@@ -470,7 +474,7 @@ SECTION_SPECS = [
         ),
     },
     {
-        "no": "14", "title": "MODEL EXPLAINABILITY REVIEW", "table": None, "weight": 1.1,
+        "no": "14", "title": "MODEL EXPLAINABILITY REVIEW", "table": None, "chart": "shap_attribution", "weight": 1.1,
         "brief": (
             "Interpret the SHAP factors supplied. Identify the factors pushing the probability of "
             "default up and those pulling it down, quantify each contribution, and reconcile them "
@@ -529,6 +533,46 @@ a different company.
 """
 
 
+# A Cohere Trial key allows 20 API calls per minute. One CAM needs 17 calls, so
+# an unthrottled run sits on the ceiling and any retry — or a second CAM in the
+# same minute — gets 429s and loses whole sections. This limiter spaces calls
+# across the whole process so the budget is never exceeded.
+class _RateLimiter:
+    def __init__(self, per_minute: int):
+        self.per_minute = max(1, per_minute)
+        self._calls = deque()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                while self._calls and now - self._calls[0] >= 60.0:
+                    self._calls.popleft()
+                if len(self._calls) < self.per_minute:
+                    self._calls.append(now)
+                    return
+                wait = 60.0 - (now - self._calls[0]) + 0.1
+            logger.info("CAM rate limit reached; waiting %.1fs for the window to clear", wait)
+            time.sleep(max(0.1, wait))
+
+
+def _rate_limit_per_min() -> int:
+    try:
+        return max(1, int(os.getenv("CAM_RATE_LIMIT_PER_MIN", "15")))
+    except (TypeError, ValueError):
+        return 15
+
+
+# Process-wide: two concurrent CAM requests must share one budget.
+_COHERE_LIMITER = _RateLimiter(_rate_limit_per_min())
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    text = f"{type(exc).__name__} {exc}".lower()
+    return "toomanyrequests" in text or "429" in text or "rate limit" in text
+
+
 def _call_cohere_section(client, spec: dict, rag_payload: str, extra_context: str, words: int) -> str:
     """Generates one section. Returns body text, or '' when the call fails."""
     paras = max(2, round(words / 115))
@@ -544,8 +588,10 @@ def _call_cohere_section(client, spec: dict, rag_payload: str, extra_context: st
     # ~1.5 tokens per word, plus headroom so the model is not truncated mid-sentence.
     max_tokens = int(min(4000, max(400, words * 2.4)))
 
+    attempts = 4
     last_error = None
-    for attempt in (1, 2):
+    for attempt in range(1, attempts + 1):
+        _COHERE_LIMITER.acquire()
         try:
             response = client.chat(
                 model=os.getenv("CAM_MODEL", "command-r-08-2024"),
@@ -562,8 +608,15 @@ def _call_cohere_section(client, spec: dict, rag_payload: str, extra_context: st
             last_error = "empty response"
         except Exception as exc:  # noqa: BLE001 — logged and surfaced by caller
             last_error = f"{type(exc).__name__}: {exc}"
-            if attempt == 1:
-                time.sleep(1.5)
+            if attempt == attempts:
+                break
+            if _is_rate_limited(exc):
+                # The quota is per minute, so a short sleep just burns another
+                # attempt. Wait out the window.
+                logger.info("CAM section %s rate limited; backing off", spec["no"])
+                time.sleep(20.0 * attempt)
+            else:
+                time.sleep(1.5 * attempt)
     logger.warning("CAM section %s (%s) failed: %s", spec["no"], spec["title"], last_error)
     return ""
 
@@ -586,6 +639,72 @@ def _fmt_pct(value, suffix="%") -> str:
         return f"{float(value):.2f}{suffix}"
     except (TypeError, ValueError):
         return "Not supplied"
+
+
+# Figure numbering follows the section it sits in, so a reader can cite it.
+CHART_CAPTIONS = {
+    "risk_position": "Figure 1.1 — Probability of default against risk bands",
+    "facility": "Figure 4.1 — Facility requested against facility recommended",
+    "financial_position": "Figure 5.1 — Extracted financial position",
+    "ratio_benchmark": "Figure 6.1 — Ratios against the sector benchmark",
+    "fraud_signals": "Figure 12.1 — Fraud signals by evidence amount",
+    "shap_attribution": "Figure 14.1 — Model factor attribution (SHAP)",
+}
+
+
+def _build_section_chart(key: Optional[str], analysis_data: dict):
+    """
+    Returns the flowables for a section's figure, or [] when the inputs are not
+    present. A thin borrower file yields fewer figures rather than an empty or
+    invented chart — the builders all return [] on missing data.
+    """
+    if not key:
+        return []
+
+    company = analysis_data.get("company", {}) or {}
+    decision = analysis_data.get("decision", {}) or {}
+    fraud = analysis_data.get("fraud", {}) or {}
+    shap = analysis_data.get("shap", {}) or {}
+    financials = analysis_data.get("financials", {}) or {}
+    benchmarks = SECTOR_BENCHMARKS.get("Manufacturing", SECTOR_BENCHMARKS["Default"])
+    width = CONTENT_WIDTH / mm
+
+    try:
+        if key == "risk_position":
+            flowables = cam_charts.risk_position_chart(
+                decision.get("probability_of_default"), decision.get("decision"), width
+            )
+        elif key == "facility":
+            flowables = cam_charts.facility_chart(
+                company.get("loan_amount_requested"),
+                decision.get("recommended_loan_amount"), width
+            )
+        elif key == "financial_position":
+            flowables = cam_charts.financial_position_chart(financials, width)
+        elif key == "ratio_benchmark":
+            flowables = cam_charts.ratio_benchmark_chart(financials, benchmarks, width)
+        elif key == "fraud_signals":
+            flowables = cam_charts.fraud_signal_chart(fraud.get("signals") or [], width)
+        elif key == "shap_attribution":
+            flowables = cam_charts.shap_attribution_chart(
+                shap.get("shap_factors") or [], width
+            )
+        else:
+            return []
+    except Exception as exc:  # noqa: BLE001 — a figure must never fail the memo
+        logger.warning("CAM chart %s failed: %s", key, exc)
+        return []
+
+    if not flowables:
+        return []
+
+    caption = CHART_CAPTIONS.get(key)
+    story = [Spacer(1, 3 * mm)]
+    if caption:
+        story.append(Paragraph(pdf_safe(caption), STYLES["h2"]))
+    story.extend(flowables)
+    story.append(Spacer(1, 3 * mm))
+    return story
 
 
 def _build_section_table(key: str, analysis_data: dict):
@@ -910,7 +1029,7 @@ def _build_toc():
 
 def generate_cam(analysis_data: dict, field_observations: str = "") -> dict:
     """
-    MASTER EXPORT — generates a long-form (10-15 page) Credit Appraisal Memorandum.
+    MASTER EXPORT — generates a long-form (15-20 page) Credit Appraisal Memorandum.
 
     Each section is generated by its own Cohere call (a single call cannot exceed
     roughly six pages of output), then assembled into a ReportLab PDF alongside
@@ -964,7 +1083,7 @@ def generate_cam(analysis_data: dict, field_observations: str = "") -> dict:
 
     # Sections are independent, so generate them concurrently. Order is restored
     # from the index, not from completion time.
-    max_workers = max(1, min(6, int(os.getenv("CAM_CONCURRENCY", "4"))))
+    max_workers = max(1, min(6, int(os.getenv("CAM_CONCURRENCY", "3"))))
     bodies: dict = {}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
@@ -1039,6 +1158,7 @@ def generate_cam(analysis_data: dict, field_observations: str = "") -> dict:
         if spec["no"] == "1":
             story.extend(_build_key_facts_table(analysis_data))
 
+        story.extend(_build_section_chart(spec.get("chart"), analysis_data))
         story.extend(_build_section_table(spec.get("table"), analysis_data))
 
     # ── Conditions for approval (verbatim, never model-rewritten) ──

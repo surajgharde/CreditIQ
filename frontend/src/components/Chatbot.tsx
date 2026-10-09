@@ -91,7 +91,14 @@ const OFFLINE_NOTICE: Record<Language, string> = {
 
 const MAX_HISTORY_TURNS = 8;
 
-const Chatbot: React.FC = () => {
+interface ChatbotProps {
+    /** Grounds answers in this analysis. Without it the assistant can only
+     *  explain the platform generally — it has no borrower data. */
+    analysisId?: number;
+    companyName?: string;
+}
+
+const Chatbot: React.FC<ChatbotProps> = ({ analysisId, companyName }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [input, setInput] = useState('');
     const [lang, setLang] = useState<Language>('en');
@@ -151,7 +158,8 @@ const Chatbot: React.FC = () => {
             const { data } = await api.post('/api/chat', {
                 message: userText,
                 lang,
-                history: priorTurns
+                history: priorTurns,
+                analysis_id: analysisId ?? null
             });
             setMessages(prev => [...prev, {
                 id: (Date.now() + 1).toString(),
@@ -192,7 +200,12 @@ const Chatbot: React.FC = () => {
                 <div className="chatbot-header">
                     <div className="chatbot-title">
                         <Bot size={20} />
-                        {uiLabels.title[lang]}
+                        <span>
+                            {uiLabels.title[lang]}
+                            {companyName && (
+                                <span className="chatbot-scope">{companyName}</span>
+                            )}
+                        </span>
                     </div>
                     <div className="chatbot-controls">
                         <select

@@ -191,7 +191,11 @@ async def run_analysis_background(analysis_id: int):
             "shap": {
                 "shap_factors": score_res.get("shap_factors", []),
                 "shap_chart_url": score_res.get("shap_chart_path")
-            }
+            },
+            # Statement lines and derived ratios from the OCR step. Without this
+            # the CAM reports every financial line as "Not extracted" even though
+            # it was read seconds earlier in this same run.
+            "financials": ocr_res
         }
         cam_res = await asyncio.to_thread(cam_service.generate_cam, analysis_data)
         if not cam_res.get("success"):
@@ -246,11 +250,15 @@ async def run_analysis_background(analysis_id: int):
         # Log the full traceback for debugging with high visibility
         logger.error(f"================ PIPELINE CRASH REPORT ================\n{traceback.format_exc()}\n=======================================================")
         
-        # If pipeline reached >= 80% progress, mark as completed anyway (results were generated)
+        # Past 80% the scoring results are real and worth keeping, so the record
+        # stays "completed" and the dashboard still renders. The failure reason is
+        # RETAINED rather than cleared: CAM generation is the step that runs after
+        # 80%, and erasing its error left a record that looked fully successful
+        # while having no CAM attached.
         current_progress = getattr(analysis, 'progress', 0) or 0
         if current_progress >= 80:
             analysis.analysis_status = "completed"
-            analysis.failure_reason = None
+            analysis.failure_reason = err_report
             company.status = "analyzed"
         else:
             db.rollback()

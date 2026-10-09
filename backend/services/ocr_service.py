@@ -1,4 +1,6 @@
 import re
+import os
+import shutil
 import time
 import logging
 import concurrent.futures
@@ -24,8 +26,58 @@ from services.external_apis import cache_get, cache_set
 
 logger = logging.getLogger(__name__)
 
-# Ensure tesseract command is explicitly defined if running on Windows
-# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+def _locate_tesseract() -> str | None:
+    """
+    Finds the Tesseract binary and points pytesseract at it.
+
+    The Windows installer does not add itself to PATH, so relying on PATH alone
+    leaves scanned-PDF OCR silently dead. Order: TESSERACT_CMD, then PATH, then
+    the usual install locations.
+    """
+    explicit = (os.getenv("TESSERACT_CMD") or "").strip()
+    if explicit and os.path.isfile(explicit):
+        pytesseract.pytesseract.tesseract_cmd = explicit
+        return explicit
+
+    on_path = shutil.which("tesseract")
+    if on_path:
+        pytesseract.pytesseract.tesseract_cmd = on_path
+        return on_path
+
+    for candidate in (
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
+        "/usr/bin/tesseract",
+        "/usr/local/bin/tesseract",
+        "/opt/homebrew/bin/tesseract",
+    ):
+        if candidate and os.path.isfile(candidate):
+            pytesseract.pytesseract.tesseract_cmd = candidate
+            return candidate
+    return None
+
+
+TESSERACT_CMD = _locate_tesseract()
+if TESSERACT_CMD:
+    logger.info("Tesseract OCR binary: %s", TESSERACT_CMD)
+else:
+    logger.warning(
+        "Tesseract binary not found. Scanned PDFs will fall back to AWS Textract, "
+        "and fail entirely if AWS credentials are absent. Install Tesseract or set "
+        "TESSERACT_CMD to its full path."
+    )
+
+
+def tesseract_languages() -> set:
+    """Language packs installed alongside the binary."""
+    if not TESSERACT_CMD:
+        return set()
+    try:
+        return {str(lang) for lang in pytesseract.get_languages(config="")}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not list Tesseract languages: %s", exc)
+        return set()
 
 def send_ws_progress(analysis_id: str, loop, pct: int, detail: str):
     """REQUIREMENT 7 - REAL TIME PROGRESS UPDATES"""
@@ -119,46 +171,99 @@ def convert_to_pdf(file_path: str, doc_type: str) -> str:
 # ----------------------------------------------------
 
 def preprocess_image_for_ocr(img: Image.Image) -> Image.Image:
-    """Apply cv2 based morphology and noise reduction."""
+    """
+    Binarises a degraded scan. Only worth applying to genuinely poor input —
+    see ocr_page_tesseract, which treats this as a fallback.
+    """
     try:
         # Convert PIL to CV2
         open_cv_image = np.array(img)
-        
+
         if len(open_cv_image.shape) == 3:
             open_cv_image = cv2.cvtColor(open_cv_image, cv2.COLOR_RGB2GRAY)
-            
+
         # Denoise
-        blur = cv2.GaussianBlur(open_cv_image, (3,3), 0)
-        
-        # Adaptive Threshold
-        thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-        
+        blur = cv2.GaussianBlur(open_cv_image, (3, 3), 0)
+
+        # Adaptive threshold. The window must be wider than a glyph stroke: a
+        # fixed 11px window on a 300dpi render cuts through the middle of the
+        # strokes and shreds them, so scale it with the page and keep it odd.
+        block = max(11, (min(open_cv_image.shape[:2]) // 40) | 1)
+        thresh = cv2.adaptiveThreshold(
+            blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block, 10
+        )
+
         # Convert back
         return Image.fromarray(thresh)
     except Exception:
         return img
 
+
+def _tesseract_pass(img: Image.Image, lang: str, psm: str = "--psm 6") -> tuple[str, float]:
+    """
+    One Tesseract run. Returns (text, mean word confidence).
+
+    Line structure is rebuilt from Tesseract's block/paragraph/line indices.
+    Joining every word with spaces collapses the page into a single line, and
+    the downstream matcher works line by line — so each statement label matched
+    the same whole-page "line" and every field came back with the same number.
+    """
+    data = pytesseract.image_to_data(
+        img, lang=lang, output_type=pytesseract.Output.DICT, config=psm
+    )
+
+    word_scores = []
+    lines: Dict[tuple, List[str]] = {}
+    order: List[tuple] = []
+
+    for i, raw_conf in enumerate(data["conf"]):
+        conf = int(raw_conf)
+        if conf <= 0:
+            continue
+        word = data["text"][i]
+        if not word.strip():
+            continue
+        word_scores.append(conf)
+        key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+        if key not in lines:
+            lines[key] = []
+            order.append(key)
+        lines[key].append(word)
+
+    text = "\n".join(" ".join(lines[key]) for key in order)
+    return text, (float(np.mean(word_scores)) if word_scores else 0.0)
+
+
+# Above this, the first pass is good enough that a second one is wasted work.
+GOOD_ENOUGH_CONFIDENCE = 75.0
+
+
 def ocr_page_tesseract(page_img: Image.Image, lang: str = "eng") -> tuple[str, float]:
-    """Run Tesseract and return text and confidence."""
-    try:
-        enhanced = preprocess_image_for_ocr(page_img)
-        data = pytesseract.image_to_data(enhanced, lang=lang, output_type=pytesseract.Output.DICT, config='--psm 6')
-        
-        word_scores = []
-        full_text = []
-        for i, conf in enumerate(data['conf']):
-            if int(conf) > 0:
-                word_scores.append(int(conf))
-                full_text.append(data['text'][i])
-                
-        text = " ".join(full_text)
-        avg_conf = float(np.mean(word_scores)) if word_scores else 0.0
-        return text, avg_conf
-    except Exception as e:
-        # Swallowing this silently made a missing Tesseract binary look like a
-        # clean run that simply found no data. Log it so the cause is visible.
-        logger.warning("Tesseract OCR unavailable or failed: %s: %s", type(e).__name__, e)
-        return "", 0.0
+    """
+    Runs Tesseract, returning the best (text, confidence) available.
+
+    The page is read as-is first. Binarisation is tuned for degraded scans and
+    actively harms clean ones — on a crisp balance sheet it took confidence from
+    92% to 23% and produced gibberish — so it is attempted only when the direct
+    read comes back poor.
+    """
+    best_text, best_conf = "", 0.0
+    attempts = (("direct", lambda: page_img), ("binarised", lambda: preprocess_image_for_ocr(page_img)))
+
+    for label, build in attempts:
+        try:
+            text, conf = _tesseract_pass(build(), lang)
+            if conf > best_conf:
+                best_text, best_conf = text, conf
+            if best_conf >= GOOD_ENOUGH_CONFIDENCE:
+                return best_text, best_conf
+            logger.debug("Tesseract %s pass: confidence %.1f", label, conf)
+        except Exception as e:
+            # Swallowing this silently made a missing Tesseract binary look like
+            # a clean run that simply found no data. Log it so the cause shows.
+            logger.warning("Tesseract OCR (%s pass) failed: %s: %s", label, type(e).__name__, e)
+
+    return best_text, best_conf
 
 def ocr_page_textract(page_img: Image.Image) -> tuple[str, float]:
     """Fallback to robust AWS Textract for very bad quality."""
@@ -246,8 +351,13 @@ def process_pdf_batch(pdf_path: str, page_nums: List[int], doc_type: str, analys
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 
                 txt, conf = ocr_page_tesseract(img)
-                if conf < 60.0:  # Bad quality
-                    txt, conf = ocr_page_textract(img) # Fallback to AWS
+                if conf < 60.0:  # Bad quality — try the stronger engine
+                    alt_txt, alt_conf = ocr_page_textract(img)
+                    # Only take the fallback when it actually returned something.
+                    # Assigning unconditionally discarded usable Tesseract text
+                    # whenever Textract was unreachable or unauthorised.
+                    if alt_txt.strip() and alt_conf >= conf:
+                        txt, conf = alt_txt, alt_conf
                 
                 text_content += txt + "\n"
                 conf_scores.append(conf)
@@ -273,8 +383,11 @@ def clean_indian_numbers(text: str) -> str:
         except Exception:
             return m.group(0)
 
-    # Rs, INR, ru symbols to standard
-    text = re.sub(r'(Rs\.?|INR|रु)\s*', '₹', text, flags=re.IGNORECASE)
+    # Rs, INR, ru symbols to standard. The leading  matters: without it the
+    # "rs" inside ordinary words is treated as a currency token, so
+    # "Shareholders Funds" became "Shareholde₹ Funds" and the label stopped
+    # matching. The same applied to creditors, debtors, directors, borrowers.
+    text = re.sub(r'(Rs\.?|INR|रु)\s*', '₹', text, flags=re.IGNORECASE)
     
     # 1,00,00,000 -> 10000000
     cleaned = re.sub(r'(?<=\d),(?=\d)', '', text)
@@ -341,10 +454,13 @@ def parse_financial_value(text: str, current_year: bool = True) -> tuple[Optiona
 def find_financial_indicators(text: str) -> Dict[str, Any]:
     """Runs keyword clustering regex against the raw document text."""
     indicators = {}
-    # Statements write the same label as "Cash & Cash Equivalents" or
-    # "Cash and Cash Equivalents"; normalising the ampersand lets one pattern
-    # match both spellings.
-    lines = re.sub(r'\s*&\s*', ' and ', text.lower()).split('\n')
+    # Statements spell the same label several ways: "Cash & Cash Equivalents" or
+    # "Cash and Cash Equivalents", "Shareholders' Funds" or "Shareholders Funds"
+    # (and OCR may emit a curly apostrophe). Normalising the ampersand and
+    # dropping apostrophes lets one pattern match every spelling.
+    normalised = re.sub(r'\s*&\s*', ' and ', text.lower())
+    normalised = re.sub(r"[‘’'`]", '', normalised)
+    lines = normalised.split('\n')
 
     keywords = {
         "revenue_fy24": ["revenue from operations", "net sales", "total income", "turnover", "operating revenue", "revenue"],
@@ -365,6 +481,12 @@ def find_financial_indicators(text: str) -> Dict[str, Any]:
 
     field_confidences = []
 
+    # (pattern, phrases that must NOT appear on the same line)
+    EXCLUSIONS = [
+        ("total equity", ("total equity and liabilities", "equity and liabilities")),
+        ("total liabilities", ("total equity and liabilities",)),
+    ]
+
     # Short acronyms must match as whole words: a plain substring test makes
     # "ebit" match inside "ebitda", so EBIT silently takes EBITDA's amount.
     # Longer multi-word phrases are matched as substrings, which is safe.
@@ -376,23 +498,51 @@ def find_financial_indicators(text: str) -> Dict[str, Any]:
         # header and reads its section number as the amount.
         if pattern.startswith("current "):
             return re.search(r'(?<!non-)(?<!non )' + re.escape(pattern), line) is not None
+        # Likewise "total equity" appears inside the balancing total "TOTAL
+        # EQUITY AND LIABILITIES", which is the whole balance sheet rather than
+        # shareholders' funds — matching it overstates net worth badly.
+        for phrase, forbidden in EXCLUSIONS:
+            if pattern == phrase and any(bad in line for bad in forbidden):
+                return False
         return pattern in line
 
+    # Keys that name a total rather than a component. A statement writes the
+    # section header ("Shareholders' Funds") above the figure and the total
+    # ("Total Shareholders' Funds 797.47") below it, so taking the first match
+    # reads the header and then picks up the first component beneath it — 485.00
+    # share capital instead of 797.47 net worth. Lines labelled "total" win.
+    # Revenue is deliberately absent: "Revenue from Operations" is the wanted
+    # line and "Total Income" is a different figure (it adds other income), so
+    # preferring the "total" line there would read the wrong number.
+    TOTAL_KEYS = {
+        "total_assets", "total_liabilities", "total_equity", "total_debt",
+        "current_assets", "current_liabilities",
+    }
+
     for key, patterns in keywords.items():
-        for i, line in enumerate(lines):
-            if any(matches(line, pattern) for pattern in patterns):
-                # Search the label's own line first; only spill into following
-                # lines when the amount is not on it (wrapped table rows).
-                val, conf = parse_financial_value(line)
-                if val is None:
-                    search_block = " ".join(lines[i:min(i + 3, len(lines))])
-                    val, conf = parse_financial_value(search_block)
-                if val is not None:
-                    if conf < 30.0:
-                        break  # Too doubtful to record
-                    indicators[key] = val
-                    field_confidences.append(conf)
-                    break
+        candidates = [
+            i for i, line in enumerate(lines)
+            if any(matches(line, pattern) for pattern in patterns)
+        ]
+        if key in TOTAL_KEYS:
+            # Stable sort: "total" lines first, original order preserved within
+            # each group.
+            candidates.sort(key=lambda i: 0 if "total" in lines[i] else 1)
+
+        for i in candidates:
+            line = lines[i]
+            # Search the label's own line first; only spill into following
+            # lines when the amount is not on it (wrapped table rows).
+            val, conf = parse_financial_value(line)
+            if val is None:
+                search_block = " ".join(lines[i:min(i + 3, len(lines))])
+                val, conf = parse_financial_value(search_block)
+            if val is not None:
+                if conf < 30.0:
+                    break  # Too doubtful to record
+                indicators[key] = val
+                field_confidences.append(conf)
+                break
 
     avg_field_conf = float(np.mean(field_confidences)) if field_confidences else 0.0
     return indicators, avg_field_conf

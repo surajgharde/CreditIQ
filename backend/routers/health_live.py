@@ -79,23 +79,34 @@ def check_cohere() -> dict:
 def check_xgboost() -> dict:
     t0 = time.time()
     try:
-        import xgboost as xgb
-        import numpy as np
-        model_path = os.path.join(os.getcwd(), "models", "credit_model.json")
-        if not os.path.exists(model_path):
-            # Try alternate paths
-            for candidate in ["credit_model.json", "model.json", "xgb_model.json"]:
-                fp = os.path.join(os.getcwd(), candidate)
-                if os.path.exists(fp):
-                    model_path = fp
-                    break
-            else:
-                return {"status": "model_file_missing", "prediction_time_ms": None}
-        model = xgb.Booster()
-        model.load_model(model_path)
-        dummy = xgb.DMatrix(np.zeros((1, 15)))
-        _ = model.predict(dummy)
-        return {"status": "loaded", "prediction_time_ms": round((time.time() - t0) * 1000, 1)}
+        import xgboost as xgb  # noqa: F401 — import proves the runtime is installed
+        import pandas as pd
+        # Check the model the scoring pipeline actually loads. This previously
+        # looked for models/credit_model.json with a 15-feature DMatrix — a file
+        # and shape this project has never used — so it always reported
+        # "model_file_missing" even with scoring working perfectly.
+        import joblib
+
+        models_dir = os.path.join(os.getcwd(), "models", "xgboost")
+        candidates = ["xgboost_creditiq_model.pkl", "manufacturing_model.pkl"]
+        model_path = next(
+            (os.path.join(models_dir, c) for c in candidates
+             if os.path.exists(os.path.join(models_dir, c))),
+            None,
+        )
+        if model_path is None:
+            return {"status": "model_file_missing", "prediction_time_ms": None}
+
+        model = joblib.load(model_path)
+        feature_names = model.get_booster().feature_names
+        dummy = pd.DataFrame([{name: 0.0 for name in feature_names}])
+        _ = model.predict_proba(dummy)
+        return {
+            "status": "loaded",
+            "model": os.path.basename(model_path),
+            "features": len(feature_names),
+            "prediction_time_ms": round((time.time() - t0) * 1000, 1),
+        }
     except Exception as e:
         return {"status": "error", "error": str(e)[:100], "prediction_time_ms": None}
 

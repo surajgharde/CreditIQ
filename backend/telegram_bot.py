@@ -37,6 +37,45 @@ logger = logging.getLogger("telegram_bot")
 POLL_TIMEOUT = 30  # seconds held open by Telegram per getUpdates call
 
 
+class AlreadyRunning(Exception):
+    """Another poller holds the lock."""
+
+
+def acquire_single_instance_lock():
+    """
+    Takes an exclusive lock so only one poller can run.
+
+    Telegram allows a single getUpdates consumer per bot. A second poller makes
+    the two race: each picks up some updates, Telegram returns 409 Conflict to
+    the loser, and in the gaps between retries BOTH deliver — so every message
+    gets answered twice. Starting the bot when one is already running is an easy
+    mistake, so it is refused here rather than left to produce duplicates.
+
+    Returns the open lock handle, which must stay open for the process's life.
+    """
+    lock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             ".telegram_bot.lock")
+    handle = open(lock_path, "a+")
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        raise AlreadyRunning(lock_path)
+
+    handle.seek(0)
+    handle.truncate()
+    handle.write(str(os.getpid()))
+    handle.flush()
+    return handle
+
+
 def clear_webhook(token: str) -> None:
     """getUpdates is refused while a webhook is registered."""
     try:
@@ -50,6 +89,16 @@ def clear_webhook(token: str) -> None:
 
 
 def main() -> int:
+    try:
+        lock = acquire_single_instance_lock()  # noqa: F841 — held for process life
+    except AlreadyRunning:
+        logger.error(
+            "Another telegram_bot.py is already polling. Telegram permits one "
+            "getUpdates consumer per bot; a second one makes every message get "
+            "answered twice. Stop the running instance first."
+        )
+        return 1
+
     token = telegram_service.bot_token()
     if not token:
         logger.error(

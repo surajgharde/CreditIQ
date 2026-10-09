@@ -290,26 +290,38 @@ def _cmd_latest(db: Session, company_id) -> str:
     return _cmd_status(db, str(analysis.id), company_id)
 
 
-def _cmd_ask(question: str, company_name: Optional[str] = None) -> str:
-    """Relays to the same assistant logic the web chat panel uses."""
-    if not question.strip():
-        return "Usage: /ask <question>. Example: /ask how is the PD calculated?"
+def _cmd_ask(db: Session, question: str, company_id=None) -> str:
+    """
+    Relays to the same assistant the web chat panel uses.
 
-    message = question.strip()
-    if company_name:
-        # Keep the assistant on this borrower's file. Note this steers the model
-        # but is not itself an access control — the data commands above are
-        # filtered in SQL, which is what actually confines a linked chat.
-        message = (
-            f"{message}\n\n(Context: the person asking is associated with "
-            f"{company_name} and may only be told about that company. Do not "
-            f"discuss any other borrower.)"
+    For a company-linked chat the borrower's latest analysis is passed as the
+    grounding, and company_id is handed to the endpoint as a SQL scope — so the
+    answer is built from that borrower's real figures and cannot reach another's
+    file. Previously this only appended the company NAME to the question, which
+    gave the model nothing to answer from and was steering rather than scoping.
+    """
+    if not question.strip():
+        return "Usage: /ask <question>. Example: /ask what is my current ratio?"
+
+    analysis_id = None
+    if company_id is not None:
+        latest = (
+            db.query(Analysis)
+            .filter(Analysis.company_id == company_id)
+            .order_by(Analysis.id.desc())
+            .first()
         )
+        if latest:
+            analysis_id = latest.id
 
     try:
         from routers.chat import ChatRequest, chat as chat_endpoint
 
-        result = chat_endpoint(ChatRequest(message=message, lang="auto"))
+        result = chat_endpoint(
+            ChatRequest(message=question.strip(), lang="auto", analysis_id=analysis_id),
+            db=db,
+            _company_scope=company_id,
+        )
         return result.reply
     except Exception as exc:  # noqa: BLE001
         from fastapi import HTTPException
@@ -405,12 +417,12 @@ def handle_update(update: dict, db: Session) -> Optional[str]:
     elif command == "/decision":
         reply = _cmd_decision(db, argument.strip(), company_id)
     elif command == "/ask":
-        reply = _cmd_ask(argument, company_name)
+        reply = _cmd_ask(db, argument, company_id)
     elif command.startswith("/"):
         reply = f"Unknown command {command}.\n\n{_help_text(kind, company_name)}"
     else:
         # Plain text is treated as a question.
-        reply = _cmd_ask(text, company_name)
+        reply = _cmd_ask(db, text, company_id)
 
     send_message(chat_id, reply)
     return reply
