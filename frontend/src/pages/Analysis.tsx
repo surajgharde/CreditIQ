@@ -351,10 +351,10 @@ function Analysis() {
             <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1rem', lineHeight: 1.5 }}>Enter the Account Number or PAN of the company to unlock and decrypt the final Credit Appraisal Memo.</p>
 
             <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '0.7rem 0.8rem', marginBottom: '1.25rem' }}>
-              <div style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#94A3B8', marginBottom: '0.45rem' }}>Demo companies</div>
+              <div style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#94A3B8', marginBottom: '0.45rem' }}></div>
               {DEMO_HINTS.map(h => (
                 <div key={h.pan} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', fontSize: '0.74rem', color: '#475569', lineHeight: 1.7 }}>
-                  <span>{h.company} <span style={{ color: '#94A3B8' }}>({h.decision})</span></span>
+                  <span>{h.company}</span>
                   <span style={{ fontFamily: 'ui-monospace, Menlo, monospace', whiteSpace: 'nowrap' }}>{h.pan}</span>
                 </div>
               ))}

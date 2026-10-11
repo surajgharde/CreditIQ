@@ -10,6 +10,8 @@ import History from './pages/History';
 import Profile from './pages/Profile';
 
 import { AuthProvider } from './context/AuthContext';
+import { ChatScopeProvider } from './context/ChatScopeContext';
+import GlobalChatbot from './components/GlobalChatbot';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import Login from './pages/Login';
 import AdminDashboard from './pages/AdminDashboard';
@@ -18,21 +20,26 @@ function App() {
   return (
     <Router>
       <AuthProvider>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
-          
-          <Route path="/admin-dashboard" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
-          <Route path="/new-analysis" element={<ProtectedRoute><NewAnalysis /></ProtectedRoute>} />
-          <Route path="/newanalysis" element={<ProtectedRoute><NewAnalysis /></ProtectedRoute>} />
-          <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
-          <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-          <Route path="/analysis" element={<ProtectedRoute><Analysis /></ProtectedRoute>} />
-          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/fraud-report" element={<ProtectedRoute><FraudReport /></ProtectedRoute>} />
-          <Route path="/warning-system" element={<ProtectedRoute><WarningSystem /></ProtectedRoute>} />
-          <Route path="/cam-success" element={<ProtectedRoute><CamSuccess /></ProtectedRoute>} />
-        </Routes>
+        <ChatScopeProvider>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/login" element={<Login />} />
+
+            <Route path="/admin-dashboard" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+            <Route path="/new-analysis" element={<ProtectedRoute><NewAnalysis /></ProtectedRoute>} />
+            <Route path="/newanalysis" element={<ProtectedRoute><NewAnalysis /></ProtectedRoute>} />
+            <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
+            <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+            <Route path="/analysis" element={<ProtectedRoute><Analysis /></ProtectedRoute>} />
+            <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/fraud-report" element={<ProtectedRoute><FraudReport /></ProtectedRoute>} />
+            <Route path="/warning-system" element={<ProtectedRoute><WarningSystem /></ProtectedRoute>} />
+            <Route path="/cam-success" element={<ProtectedRoute><CamSuccess /></ProtectedRoute>} />
+          </Routes>
+          {/* Single instance, outside Routes, so it is present on every page
+              and survives navigation with its transcript intact. */}
+          <GlobalChatbot />
+        </ChatScopeProvider>
       </AuthProvider>
     </Router>
   );

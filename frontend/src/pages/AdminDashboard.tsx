@@ -11,7 +11,6 @@ import { useAuth } from '../context/AuthContext';
 import './AdminDashboard.css';
 import HistoryPage from './History';
 import NewAnalysis from './NewAnalysis';
-import Chatbot from '../components/Chatbot';
 
 // New Modular Components
 import Sidebar from '../components/Dashboard/Sidebar';
@@ -621,7 +620,6 @@ const AdminDashboard: React.FC = () => {
                     {renderContent()}
                 </div>
             </main>
-            <Chatbot />
         </div>
     );
 };

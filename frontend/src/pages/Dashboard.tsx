@@ -4,9 +4,9 @@ import { Plus, AlertTriangle, Activity, Network, CalendarMinus, AlertCircle, Fil
 import { getFullResults, getSHAPChartUrl } from '../services/resultsApi';
 import { downloadCAM } from '../services/camApi';
 import { useApi, Skeleton, ErrorBanner } from '../services/useApi';
-import Chatbot from '../components/Chatbot';
 import './Dashboard.css';
 import { findDemoAccount } from '../services/demoAccounts';
+import { usePublishChatScope } from '../context/ChatScopeContext';
 
 function colorByRisk(r: string) {
   const u = (r || '').toUpperCase();
@@ -47,6 +47,10 @@ function Dashboard() {
       errorMsg = 'No matching company data found. Please verify details.';
     }
   }
+
+  // Above the early returns so the hook order never changes. Demo reports have
+  // no backend analysis row, so they pass the name only.
+  usePublishChatScope(demoParam ? undefined : analysisId, data?.company?.company_name);
 
   if (loading) return (
     <div style={{ padding: '2rem' }}>
@@ -277,7 +281,6 @@ function Dashboard() {
           </button>
         </div>
       </div>
-      <Chatbot analysisId={demoParam ? undefined : analysisId} companyName={company?.company_name} />
     </div>
   );
 }
