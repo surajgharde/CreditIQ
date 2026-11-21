@@ -153,9 +153,9 @@ def detect_document_type(file_path: str) -> str:
 
 def convert_to_pdf(file_path: str, doc_type: str) -> str:
     """Fallback converter using libreoffice or pdf rendering."""
-    # In a real environment, we would use ms-word com or libreoffice
-    # But for robustness we skip conversion and treat supported ones.
-    # Hackathon safe failover for non-pdfs:
+    # Office documents would need libreoffice or the Word COM API; neither is
+    # assumed here, so only images are converted and anything else is passed
+    # through for the caller to handle.
     if doc_type == "image":
         try:
             img = Image.open(file_path)

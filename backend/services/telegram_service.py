@@ -212,8 +212,9 @@ def _cmd_status(db: Session, arg: str, company_id=None) -> str:
         lines.append(f"Failure: {analysis.failure_reason[:300]}")
     if analysis.cam_pdf_path or analysis.cam_document_path:
         lines.append("CAM: generated")
-    # A zero data-quality score means nothing was extracted, so any decision on
-    # this record rests on fallback constants rather than real financials.
+    # A zero data-quality score means nothing was extracted. Scoring refuses to
+    # return a decision in that case, so a decision on such a record predates
+    # that change.
     if (analysis.data_quality_score or 0) <= 0 and analysis.decision:
         lines.append(
             "\nWarning: no financial data was extracted for this analysis, so the "
@@ -267,8 +268,8 @@ def _cmd_decision(db: Session, arg: str, company_id=None) -> str:
 
     if (analysis.data_quality_score or 0) <= 0:
         lines.append(
-            "\nWarning: no financial data was extracted for this analysis. The figures "
-            "above rest on fallback constants, not real statements."
+            "\nWarning: no financial data was extracted for this analysis, so the "
+            "figures above are not derived from real statements. Re-run it."
         )
 
     lines.append("\nPrototype output. Not a credit sanction.")

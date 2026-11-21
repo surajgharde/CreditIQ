@@ -309,7 +309,9 @@ returns 200 even when handling fails, because a non-200 makes Telegram retry the
 same update indefinitely.
 
 Replies carry a prototype disclaimer, and any analysis whose data quality score
-is zero is flagged as resting on fallback constants rather than real statements.
+is zero is flagged as not resting on real statements. Scoring now refuses to
+return a decision when no financial ratio can be computed, so such a record can
+only predate that change.
 
 ### The credit model
 

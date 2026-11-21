@@ -240,4 +240,8 @@ def preview_cam(analysis_id: int, db: Session = Depends(get_db)):
 
     return {
         "executive_summary": recommendation.get("decision_reasoning", "Analysis results pending final review."),
-        "decision": analysis.decis
+        "decision": analysis.decision or "PENDING",
+        "key_findings": findings,
+        "fraud_summary": f"Integrity check returned risk level {fraud_val}. Specific evidence found in {len(fraud_data.get('signals', [])) if isinstance(fraud_data, dict) else 0} signals.",
+        "credit_score_summary": f"XGBoost Model evaluated final PD at {pd_val:.1f}%. Top factor: {shap.get('shap_factors', ['None'])[0] if isinstance(shap, dict) and shap.get('shap_factors') else 'N/A'}."
+    }

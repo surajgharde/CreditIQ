@@ -261,6 +261,17 @@ function WarningSystem() {
                   ? '⚠ Critical Breach — Trajectory exceeds risk threshold.'
                   : '✓ Steady — Probability within acceptable range.'}
               </div>
+              {/*
+                The backend has no stored history for a borrower scored only
+                once, and returns an illustrative curve around the current PD.
+                Saying so is the difference between a chart and a claim.
+              */}
+              {(traj as any).is_synthetic && (
+                <div style={{ color: '#B45309', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 6, padding: '6px 10px', fontSize: '0.78rem', marginTop: 8, fontWeight: 600 }}>
+                  Illustrative shape — no monitoring history is stored for this borrower yet.
+                  Only the current PD is a model reading.
+                </div>
+              )}
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Current PD</div>

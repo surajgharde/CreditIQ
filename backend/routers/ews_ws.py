@@ -110,6 +110,9 @@ def build_fast_payload(company_id: int) -> dict:
                 for t in db_traj
             ]
         else:
+            # No stored history: an illustrative shape around the current PD,
+            # not six months of observed readings. Flagged so the chart can say
+            # so instead of showing invented history as monitoring.
             import math
             now = datetime.now()
             trajectory = []
@@ -124,6 +127,7 @@ def build_fast_payload(company_id: int) -> dict:
                     "year":  dt.strftime("%Y"),
                     "probability_of_default": pd_pt,
                     "is_predicted": (i == 0),
+                    "is_synthetic": True,
                 })
 
         alert_triggered = alert_triggered or any(
@@ -177,6 +181,7 @@ def build_fast_payload(company_id: int) -> dict:
                 "alert_threshold": alert_threshold,
                 "alert_triggered": alert_triggered,
                 "current_pd": round(baseline_pd, 1),
+                "is_synthetic": not db_traj,
             },
             "signals": signals,
             "alerts_sent": alerts,

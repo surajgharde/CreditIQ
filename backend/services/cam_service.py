@@ -257,8 +257,15 @@ def construct_rag_context(analysis_data: dict) -> str:
         "Level_2_Risk_Signals": {
             "fraud_overall": fraud.get("overall_fraud_risk"),
             "fraud_signals": fraud.get("signals", []),
+            "fraud_checks_run": f"{fraud.get('checks_run')} of {fraud.get('checks_total')}",
+            # A signal marked synthetic was generated in demo mode, not found.
+            # The memo must describe it that way or not at all; UNKNOWN means a
+            # check could not run, which is not the same as a clean result.
+            "fraud_signals_include_generated_demo_data": fraud.get("contains_synthetic_signals", False),
+            "generated_demo_signal_types": fraud.get("synthetic_signal_types", []),
             "news_risk_score": news.get("news_risk_score"),
             "news_signals": news.get("top_signals", []),
+            "news_coverage_found": news.get("news_data_available", True),
             "shap_factors": shap.get("shap_factors", [])
         },
         "Level_3_Benchmarks": {
@@ -525,6 +532,11 @@ Hard rules:
 words that it was not supplied and record it as an information gap. An honest gap is \
 required; a fabricated figure is a serious defect.
 - Never emit placeholder markup such as [text], [N/A], [__], TBD or XXX.
+- A signal whose description begins with "[SYNTHETIC" was generated for a demo and is \
+not a finding about this borrower. Either omit it, or state explicitly that it is \
+generated demo data. Never write it up as a real finding.
+- A risk level of UNKNOWN, or a check reported as not run, means the check could not be \
+performed. Report it as an outstanding check, never as a clean or satisfactory result.
 - Do not use filler such as "moderate performance", "generally satisfactory" or "areas of \
 concern" without an accompanying figure.
 - No markdown. No bold, no bullets, no headings, no asterisks. Plain prose paragraphs \

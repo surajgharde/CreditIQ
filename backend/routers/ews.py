@@ -69,23 +69,27 @@ def get_ews_dashboard(company_id: int, db: Session = Depends(get_db)):
             "is_predicted": t.is_predicted
         })
 
-    # If no historical data, send fully synthesized realistic dynamic trend curves to wow the judges
-    if not trajectory_data:
+    # No stored history. The curve below is an illustrative shape around the
+    # current PD, not six months of observed readings: this borrower has only
+    # ever been scored once. Every generated point is flagged is_synthetic and
+    # the payload carries trajectory_is_synthetic, so the chart can say so
+    # rather than presenting invented history as monitoring.
+    trajectory_is_synthetic = not trajectory_data
+    if trajectory_is_synthetic:
         import math
         current_dt = datetime.now()
-        
-        # Build 6 months of historical variance looping realistically around the current baseline 
+
         for i in range(5, -1, -1):
             hist_dt = current_dt - timedelta(days=30 * i)
-            # Math: Add some sine-wave variance + random noise + slight upward trend to make it look like active ML tracking
-            variance = math.sin((6-i) * 0.8) * 3.5 + ((i % 2) * 1.5)
-            calc_pd = max(1.0, min(99.0, baseline_pd - i*1.2 + variance))
-            
+            variance = math.sin((6 - i) * 0.8) * 3.5 + ((i % 2) * 1.5)
+            calc_pd = max(1.0, min(99.0, baseline_pd - i * 1.2 + variance))
+
             trajectory_data.append({
                 "month": hist_dt.strftime("%b"),
                 "year": hist_dt.strftime("%Y"),
                 "probability_of_default": round(calc_pd, 1),
-                "is_predicted": i == 0 # Only the current month is the 'Predicted' new point
+                "is_predicted": i == 0,  # Only the current month is the 'Predicted' new point
+                "is_synthetic": True,
             })
 
     # Construct Signals Dynamically
@@ -164,7 +168,10 @@ def get_ews_dashboard(company_id: int, db: Session = Depends(get_db)):
             "alert_threshold": alert_threshold,
             "alert_triggered": alert_triggered,
             "alert_trigger_month": alert_trigger_month,
-            "current_pd": round(baseline_pd, 1)
+            "current_pd": round(baseline_pd, 1),
+            # true when there is no stored history and the curve is an
+            # illustrative shape around the current PD.
+            "is_synthetic": trajectory_is_synthetic,
         },
         "signals": signals_list,
         "alerts_sent": alerts_sent_list,

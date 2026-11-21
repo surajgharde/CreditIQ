@@ -241,8 +241,9 @@ def build_company_context(db: Session, analysis_id: int, company_id: Optional[in
 
     if (analysis.data_quality_score or 0) <= 0 and analysis.decision:
         lines.append(
-            "WARNING: no financial data was extracted for this analysis, so the "
-            "decision rests on fallback constants rather than real statements."
+            "WARNING: no financial data was extracted for this analysis. Scoring "
+            "now refuses to return a decision in that case, so any decision on "
+            "this record predates that change. Re-run it."
         )
 
     # Extracted statement lines and ratios, written by the OCR step.
