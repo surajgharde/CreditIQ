@@ -34,14 +34,46 @@ function FraudReport() {
   const { gst_detector: gst, circular_trading: ct, mca_xray: mca, overall_verdict: verdict } = data;
   const graphUrl = getCircularTradingGraphUrl(analysisId);
 
-  const isOverallClean = verdict.risk_level === 'LOW' || verdict.risk_level === 'GOOD' || verdict.risk_level === 'CLEAN';
-  
+  // UNKNOWN means a check could not run. It used to fall through to the same
+  // green styling as LOW, so an unperformed screen read as "Vetted: Zero
+  // Exposure Signals" — the single most misleading state this page could show.
+  const isOverallUnknown = (verdict.risk_level || '').toUpperCase() === 'UNKNOWN';
+  const isOverallClean = !isOverallUnknown &&
+    (verdict.risk_level === 'LOW' || verdict.risk_level === 'GOOD' || verdict.risk_level === 'CLEAN');
+
   const getBadgeStyle = (level: string) => {
     const l = (level || '').toUpperCase();
     if (l === 'HIGH' || l === 'CRITICAL') return { bg: '#FEE2E2', text: '#B91C1C', border: '#FECACA' };
     if (l === 'MEDIUM') return { bg: '#FFEDD5', text: '#C2410C', border: '#FED7AA' };
+    if (l === 'UNKNOWN' || !l) return { bg: '#F1F5F9', text: '#475569', border: '#CBD5E1' };
     return { bg: '#DCFCE7', text: '#15803D', border: '#BBF7D0' };
   };
+
+  /** Shown in place of a result when a check could not run. */
+  const NotRun = ({ detail }: { detail?: string }) => (
+    <div style={{ padding: '1.5rem', background: '#F8FAFC', borderRadius: 16, display: 'flex', gap: 16, alignItems: 'center', border: '1px solid #CBD5E1' }}>
+      <div style={{ background: '#64748B', color: 'white', padding: 8, borderRadius: '50%' }}><AlertTriangle size={24} /></div>
+      <div>
+        <div style={{ fontWeight: 700, color: '#334155', fontSize: '1.05rem' }}>Check did not run</div>
+        <div style={{ fontSize: '0.9rem', color: '#475569', marginTop: 2 }}>
+          {detail || 'The data this check needs was not available. It is outstanding, not passed.'}
+        </div>
+      </div>
+    </div>
+  );
+
+  const didNotRun = (level?: string) => (level || '').toUpperCase() === 'UNKNOWN' || !level;
+
+  // Banner palette: green when clean, grey when a check could not run, red when
+  // something was actually found.
+  const banner = isOverallUnknown
+    ? { bg: 'linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)', border: '#CBD5E133', icon: '#64748B', title: '#334155', body: '#475569',
+        headline: 'Not screened — checks could not run' }
+    : isOverallClean
+      ? { bg: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)', border: '#10B98133', icon: '#10B981', title: '#065F46', body: '#047857',
+          headline: 'No fraud signal raised by the checks that ran' }
+      : { bg: 'linear-gradient(135deg, #FEF2F2 0%, #FEE2E2 100%)', border: '#EF444433', icon: '#EF4444', title: '#991B1B', body: '#B91C1C',
+          headline: `${verdict.signals_count} anomal${verdict.signals_count === 1 ? 'y' : 'ies'} detected` };
   
   const verdictStyle = getBadgeStyle(verdict.risk_level);
 
@@ -82,25 +114,37 @@ function FraudReport() {
       </nav>
 
       <div className="fraud-container">
+        {(verdict as any).contains_synthetic_signals && (
+          <div style={{
+            background: '#FFFBEB', border: '1px solid #F59E0B', borderRadius: 12,
+            padding: '0.9rem 1.1rem', marginBottom: '1rem', color: '#92400E', fontWeight: 600,
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <AlertTriangle size={18} />
+            Demo mode: one or more signals below are SYNTHETIC generated data, not findings about this company.
+          </div>
+        )}
+
         {/* Overall Verdict Banner */}
-        <div className="fraud-verdict-banner" style={{ 
-            backgroundColor: isOverallClean ? '#ECFDF5' : '#FEF2F2', 
-            border: `1px solid ${isOverallClean ? '#10B98133' : '#EF444433'}`,
-            background: isOverallClean 
-                ? 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)' 
-                : 'linear-gradient(135deg, #FEF2F2 0%, #FEE2E2 100%)'
+        <div className="fraud-verdict-banner" style={{
+            border: `1px solid ${banner.border}`,
+            background: banner.bg,
         }}>
-          {isOverallClean 
-            ? <div style={{ background: '#10B981', padding: 12, borderRadius: 12, color: 'white' }}><ShieldAlert size={24} /></div>
-            : <div style={{ background: '#EF4444', padding: 12, borderRadius: 12, color: 'white' }}><AlertTriangle size={24} /></div>
-          }
+          <div style={{ background: banner.icon, padding: 12, borderRadius: 12, color: 'white' }}>
+            {isOverallClean ? <ShieldAlert size={24} /> : <AlertTriangle size={24} />}
+          </div>
           <div>
-            <div style={{ fontWeight: 800, color: isOverallClean ? '#065F46' : '#991B1B', fontSize: '1.25rem', letterSpacing: '-0.02em' }}>
-              {isOverallClean ? "Vetted: Zero Exposure Signals" : `${verdict.signals_count} Critical Anomalies Detected`}
+            <div style={{ fontWeight: 800, color: banner.title, fontSize: '1.25rem', letterSpacing: '-0.02em' }}>
+              {banner.headline}
             </div>
-            <div style={{ color: isOverallClean ? '#047857' : '#B91C1C', fontSize: '0.95rem', marginTop: 4, fontWeight: 500, opacity: 0.9 }}>
-                {verdict.recommendation || "System verified 100% creditworthiness integrity."}
+            <div style={{ color: banner.body, fontSize: '0.95rem', marginTop: 4, fontWeight: 500, opacity: 0.9 }}>
+                {verdict.recommendation}
             </div>
+            {(verdict as any).checks_total != null && (
+              <div style={{ color: banner.body, fontSize: '0.82rem', marginTop: 6, fontWeight: 500, opacity: 0.8 }}>
+                {(verdict as any).checks_run} of {(verdict as any).checks_total} checks ran on real data.
+              </div>
+            )}
           </div>
         </div>
 
@@ -116,7 +160,9 @@ function FraudReport() {
             </div>
           </div>
           
-          {gst.risk_level === 'GOOD' || gst.risk_level === 'LOW' ? (
+          {didNotRun(gst.risk_level) ? (
+              <NotRun detail={gst.finding} />
+          ) : gst.risk_level === 'GOOD' || gst.risk_level === 'LOW' ? (
               <div style={{ padding: '1.5rem', background: '#F0FDF4', borderRadius: 16, display: 'flex', gap: 16, alignItems: 'center', border: '1px solid #BBF7D0' }}>
                   <div style={{ background: '#16A34A', color: 'white', padding: 8, borderRadius: '50%' }}><CheckCircle2 size={24} /></div>
                   <div>
@@ -155,14 +201,16 @@ function FraudReport() {
                 <div style={{ color: '#0d9488' }}><Fingerprint size={20} /></div>
                 <div className="fraud-section-title">Circular Trading Topology</div>
             </div>
-            <div className="fraud-risk-tag" style={{ backgroundColor: getBadgeStyle(ct.detected ? 'HIGH' : 'GOOD').bg, color: getBadgeStyle(ct.detected ? 'HIGH' : 'GOOD').text }}>
-                {ct.detected ? 'HIGH RISK' : 'CLEAN'}
+            <div className="fraud-risk-tag" style={{ backgroundColor: getBadgeStyle(didNotRun((ct as any).risk_level) ? 'UNKNOWN' : ct.detected ? 'HIGH' : 'GOOD').bg, color: getBadgeStyle(didNotRun((ct as any).risk_level) ? 'UNKNOWN' : ct.detected ? 'HIGH' : 'GOOD').text }}>
+                {didNotRun((ct as any).risk_level) ? 'NOT SCREENED' : ct.detected ? 'HIGH RISK' : 'CLEAN'}
             </div>
           </div>
-          
+
           <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div style={{ maxWidth: '70%', lineHeight: 1.5 }}>
-                {ct.detected ? (
+                {didNotRun((ct as any).risk_level) ? (
+                    <NotRun detail={(ct as any).finding} />
+                ) : ct.detected ? (
                     <div style={{ color: '#991B1B', fontWeight: 500 }}>
                         <strong style={{ fontSize: '1.1rem' }}>{ct.entities_involved} connected nodes</strong> identified rotating <strong style={{ color: '#DC2626' }}>₹{crore(ct.total_amount_rotated)} Crore</strong> in a closed value loop.
                     </div>
@@ -199,7 +247,9 @@ function FraudReport() {
             </div>
           </div>
           
-          {mca.risk_level === 'GOOD' || mca.risk_level === 'LOW' ? (
+          {didNotRun(mca.risk_level) ? (
+              <NotRun detail={mca.disqualification_reason} />
+          ) : mca.risk_level === 'GOOD' || mca.risk_level === 'LOW' ? (
               <div style={{ background: '#ECFDF5', border: '1px solid #BBF7D0', padding: '1.5rem', borderRadius: 16, display: 'flex', gap: 16 }}>
                   <div style={{ background: '#10B981', color: 'white', padding: 8, borderRadius: 12, height: 'fit-content' }}><CheckCircle2 size={24} /></div>
                   <div>

@@ -38,35 +38,64 @@ def get_fraud_results(analysis_id: int, db: Session = Depends(get_db)):
     mca_sig = next((s for s in signals_list if s.get("signal_type") == "MCA_DIRECTOR"), {})
     mca_raw = mca_sig.get("raw_data", {})
     
+    # Defaults are UNKNOWN, not GOOD. A check whose signal is absent did not
+    # run, and the previous defaults turned that into "clean matching between
+    # vendor declarations and company claims" and "safe to proceed".
+    overall_risk = fraud_data.get("fraud_risk_level", "UNKNOWN")
+    checks_run = fraud_data.get("checks_run", 0)
+    if overall_risk == "HIGH":
+        recommendation = "Multiple patterns detected."
+    elif checks_run == 0:
+        recommendation = (
+            "No check could be performed: no GST returns, transaction ledger or "
+            "director DINs were available. These checks are outstanding, not passed."
+        )
+    else:
+        recommendation = (
+            f"{checks_run} of {fraud_data.get('checks_total', 3)} checks ran and "
+            "found no pattern. Any remaining check is outstanding."
+        )
+
     return {
         "gst_detector": {
             "gstr_2a_amount": 0.0, # We lack the raw absolute numbers, but we have mismatch %
             "gstr_3b_amount": 0.0,
             "mismatch_amount": gst_sig.get("evidence_amount", 0.0),
-            "confidence_score": gst_sig.get("confidence_score", 100.0),
-            "risk_level": gst_sig.get("risk_level", "GOOD"),
-            "finding": gst_sig.get("description", "Clean matching between Vendor declarations and Company claims."),
-            "research_source": gst_sig.get("source", "GSTN Document/API Comparison")
+            "confidence_score": gst_sig.get("confidence_score", 0.0),
+            "risk_level": gst_sig.get("risk_level", "UNKNOWN"),
+            "finding": gst_sig.get("description", "The GST mismatch check did not run."),
+            "research_source": gst_sig.get("source", "GSTN Document/API Comparison"),
+            "synthetic": gst_sig.get("synthetic", False),
+            "data_available": gst_sig.get("data_available", False),
         },
         "circular_trading": {
             "detected": circ_sig.get("risk_level") == "HIGH",
             "entities_involved": len(circ_sig.get("graph_data", {}).get("nodes", [])) if circ_sig.get("risk_level") == "HIGH" else 0,
             "total_amount_rotated": circ_sig.get("evidence_amount", 0.0),
             "entities": [],
+            "risk_level": circ_sig.get("risk_level", "UNKNOWN"),
+            "finding": circ_sig.get("description", "The circular trading check did not run."),
+            "synthetic": circ_sig.get("synthetic", False),
+            "data_available": circ_sig.get("data_available", False),
             "graph_data": circ_sig.get("graph_data", {"nodes": [], "edges": []})
         },
         "mca_xray": {
-            "promoter_name": "Primary Promoter",
-            "din_number": "Not explicitly supplied",
+            "promoter_name": "Not supplied",
+            "din_number": "Not supplied",
             "disqualified": mca_raw.get("is_disqualified", False),
-            "disqualification_reason": mca_sig.get("description", ""),
+            "disqualification_reason": mca_sig.get("description", "The director check did not run."),
             "past_companies": [],
-            "risk_level": mca_sig.get("risk_level", "GOOD")
+            "risk_level": mca_sig.get("risk_level", "UNKNOWN"),
+            "synthetic": mca_sig.get("synthetic", False),
+            "data_available": mca_sig.get("data_available", False),
         },
         "overall_verdict": {
-            "risk_level": fraud_data.get("fraud_risk_level", "LOW"),
+            "risk_level": overall_risk,
             "signals_count": len([s for s in signals_list if s.get("risk_level") in ["MEDIUM", "HIGH"]]),
-            "recommendation": "Multiple patterns detected." if fraud_data.get("fraud_risk_level") == "HIGH" else "All three analytics layers show clean baseline profiles. Safe to proceed."
+            "checks_run": checks_run,
+            "checks_total": fraud_data.get("checks_total", 3),
+            "contains_synthetic_signals": fraud_data.get("fraud_data_synthetic", False),
+            "recommendation": recommendation,
         }
     }
 

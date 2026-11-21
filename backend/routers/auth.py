@@ -7,7 +7,6 @@ from utils.auth import verify_password, create_access_token, decode_token_email
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import datetime, timezone
 import secrets
-import jwt
 from config import config
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
