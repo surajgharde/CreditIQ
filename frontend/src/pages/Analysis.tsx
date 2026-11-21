@@ -73,7 +73,7 @@ function Analysis() {
         50:  { step_name: 'Fraud Detection Engine',     step_detail: 'Cross-verified GST and circular trading' },
         65:  { step_name: 'News Intelligence Agent',    step_detail: '24 articles scanned with FinBERT' },
         80:  { step_name: 'XGBoost + SHAP Scoring',    step_detail: 'Probability of Default calculated' },
-        100: { step_name: 'Claude AI CAM Generation',  step_detail: 'Credit Appraisal Memo generated' },
+        100: { step_name: 'Cohere CAM Generation',  step_detail: 'Credit Appraisal Memo generated' },
       };
 
       const poll = async () => {

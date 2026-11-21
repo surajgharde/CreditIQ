@@ -1,286 +1,477 @@
-import os
-import uuid
-import joblib
-import pandas as pd
-import numpy as np
-import xgboost as xgb
-import shap
-import matplotlib.pyplot as plt
-from typing import Dict, Any
+"""
+Credit scoring: probability of default, SHAP attribution, pricing and sizing.
 
-# Disable UI blocking for SHAP plot generation headless
-import matplotlib
-matplotlib.use('Agg')
+What the model is
+-----------------
+One XGBoost classifier, trained by `train_model.py` on the UCI "Polish
+companies bankruptcy" dataset (10,503 firms, 64 reported financial ratios).
+Its twelve features are firm-level ratios — the ones `services/credit_features.py`
+defines — and nothing else. Held-out ROC-AUC, KS and calibration are recorded in
+`models/xgboost/metrics.json` by the training run that produced the model file.
 
-# Paths for saving models and charts
-MODELS_DIR = os.path.join(os.getcwd(), "models", "xgboost")
-GRAPHS_DIR = os.path.join(os.getcwd(), "graphs")
-os.makedirs(MODELS_DIR, exist_ok=True)
-os.makedirs(GRAPHS_DIR, exist_ok=True)
+What the model is not
+---------------------
+It does not score fraud or news. Those have no labels in any dataset here, so
+they cannot be features; inventing a column for them was how the previous
+version worked, and it meant the PD moved for reasons the model had never been
+trained on. Fraud and adverse news now enter where they can be stated plainly:
+the underwriting decision and the risk premium, both rule-based and both printed
+in the response.
 
-
-# =====================================================================
-# PART 1: REAL MODEL TRAINING ENGINE (Called Once on System Init)
-# =====================================================================
-def ensure_models_trained():
-    """
-    Downloads Kaggle Home Credit Default Risk dataset and trains 6 distinct XGBoost models.
-    Saves them via Joblib to disk.
-    """
-    base_model_path = os.path.join(MODELS_DIR, "xgboost_creditiq_model.pkl")
-    if os.path.exists(base_model_path):
-        return # Already trained
-
-    print("Training Real XGBoost Credit Scoring Base Model...")
-
-    if not os.getenv("KAGGLE_USERNAME") or not os.getenv("KAGGLE_KEY"):
-        raise EnvironmentError("Missing KAGGLE_USERNAME or KAGGLE_KEY. Cannot download Home Credit Default Risk dataset.")
-        
-    os.environ['KAGGLE_USERNAME'] = os.getenv("KAGGLE_USERNAME", "")
-    os.environ['KAGGLE_KEY'] = os.getenv("KAGGLE_KEY", "")
-
-    import kaggle
-    from zipfile import ZipFile
-    
-    # Download dataset directly from kaggle competitions
-    dataset_path = os.path.join(os.getcwd(), "data")
-    os.makedirs(dataset_path, exist_ok=True)
-    
-    csv_file_path = os.path.join(dataset_path, "application_train.csv")
-    if not os.path.exists(csv_file_path):
-        kaggle.api.authenticate()
-        kaggle.api.competition_download_files('home-credit-default-risk', path=dataset_path)
-        zip_path = os.path.join(dataset_path, "home-credit-default-risk.zip")
-        with ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(dataset_path)
-
-    # Load authentic Home Credit dataset
-    app_train = pd.read_csv(csv_file_path)
-
-    # Required feature mapping to the actual Kaggle dataset
-    # We rename closest physical proxies linearly for standard pipeline interfacing
-    # If a feature doesn't physically map, we generate it safely or retain its closest relative
-    data = pd.DataFrame()
-    
-    # 1. target
-    data["target"] = app_train["TARGET"]
-    
-    # proxy features directly to requested pipeline requirements based on Home Credit stats
-    data["current_ratio"] = app_train["AMT_CREDIT"] / (app_train["AMT_INCOME_TOTAL"] + 1) # Closest structural mapping proxy
-    data["debt_to_equity"] = app_train["AMT_ANNUITY"] / (app_train["AMT_CREDIT"] + 1)
-    data["interest_coverage"] = app_train["AMT_INCOME_TOTAL"] / (app_train["AMT_ANNUITY"] + 1)
-    data["revenue_growth_percent"] = app_train["REGION_POPULATION_RELATIVE"] * 100 # Structural metric
-    data["ebitda_margin_percent"] = app_train["EXT_SOURCE_1"].fillna(0.5) * 100
-    data["data_quality_score"] = app_train["EXT_SOURCE_2"].fillna(0.5) * 100
-    data["fraud_risk_score"] = app_train["EXT_SOURCE_3"].fillna(0.5) * 100
-    data["news_risk_score"] = app_train["DAYS_BIRTH"].abs() / 365 # proxy behavior variable
-    data["gst_filing_irregularity"] = app_train["OBS_30_CNT_SOCIAL_CIRCLE"].fillna(0).astype(int)
-    data["loan_to_revenue_ratio"] = app_train["AMT_CREDIT"] / (app_train["AMT_INCOME_TOTAL"] + 1)
-    data["debt_service_coverage"] = app_train["AMT_INCOME_TOTAL"] / (app_train["AMT_ANNUITY"] * 12 + 1)
-    
-    # Sector Encoded as Numeric mapping (using organization type as proxy)
-    # Organization Type maps structurally to our 5 sectors requirement 
-    # 0: Mfg, 1: RE, 2: Trd, 3: Svc, 4: Ren
-    org_mapping = app_train["ORGANIZATION_TYPE"].astype("category").cat.codes
-    data["sector_encoded"] = org_mapping % 5 
-    
-    # Drop NaNs aggressively for clean convergence
-    data.fillna(0, inplace=True)
-
-    # Train Test Split (80/20)
-    from sklearn.model_selection import train_test_split
-    X = data.drop("target", axis=1)
-    y = data["target"]
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    # Train Base Model natively parameters
-    model = xgb.XGBClassifier(
-        n_estimators=500,
-        max_depth=6,
-        learning_rate=0.05,
-        subsample=0.8,
-        early_stopping_rounds=20,
-        eval_metric="logloss",
-        random_state=42
-    )
-
-    model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
-    joblib.dump(model, base_model_path)
-    
-    # Train Sector Specific Models via dataset subsetting map
-    sectors = {
-        "manufacturing": 0, "real_estate": 1, 
-        "trading": 2, "services": 3, "renewable": 4
-    }
-    
-    for sector_name, code in sectors.items():
-        subset_X = X_train[X_train["sector_encoded"] == code]
-        subset_y = y_train[X_train["sector_encoded"] == code]
-        
-        sector_model = xgb.XGBClassifier(n_estimators=100, max_depth=5, learning_rate=0.03, random_state=42)
-        if len(subset_X) > 10:
-            sector_model.fit(subset_X, subset_y)
-        else:
-            sector_model = model # Safe fallback to base if subset collapses 
-            
-        joblib.dump(sector_model, os.path.join(MODELS_DIR, f"{sector_name}_model.pkl"))
-
-# Ensure execution sequentially once
-# ensure_models_trained()  # Called only when actually requested by the agent or deployed.
-
+Missing inputs
+--------------
+A ratio whose statement line was not extracted is passed to XGBoost as NaN, and
+XGBoost routes missing values down the branch it learned for them. It is not
+replaced by a plausible-looking default, because a decision computed from
+invented inputs is indistinguishable from one computed from real inputs. Every
+ratio that was missing is listed in the response as `features_not_extracted`.
+"""
+from __future__ import annotations
 
 import hashlib
-from services.external_apis import cache_get, cache_set
 import json
+import logging
+import math
+import os
+import uuid
+from typing import Any, Dict, List, Optional, Tuple
 
-def get_chromadb_context(company_name: str) -> Dict[str, float]:
+import joblib
+import matplotlib
+import numpy as np
+import pandas as pd
+import shap
+
+matplotlib.use("Agg")  # headless: no display needed to render the SHAP plot
+import matplotlib.pyplot as plt  # noqa: E402
+
+from services.credit_features import (  # noqa: E402
+    FEATURE_DEFINITIONS,
+    FEATURES,
+    frame_from_financials,
+)
+from services.external_apis import cache_get, cache_set  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
+# Anchored to the backend directory rather than the working directory, so the
+# model is found regardless of where the server was started from.
+BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODELS_DIR = os.path.join(BACKEND_DIR, "models", "xgboost")
+GRAPHS_DIR = os.path.join(BACKEND_DIR, "graphs")
+MODEL_PATH = os.path.join(MODELS_DIR, "creditiq_pd_xgboost.pkl")
+METRICS_PATH = os.path.join(MODELS_DIR, "metrics.json")
+os.makedirs(GRAPHS_DIR, exist_ok=True)
+
+# Pricing matrix. Every number here is a stated policy choice, not a model
+# output, and the response breaks the final rate back down into these parts.
+REPO_RATE_PERCENT = 6.5
+PD_SPREAD_BANDS = ((10.0, 1.5), (20.0, 3.0), (30.0, 4.5), (40.0, 6.0))
+PD_SPREAD_ABOVE_TOP_BAND = 8.0
+# UNKNOWN means the fraud checks could not run. It is priced like MEDIUM rather
+# than like LOW: an unperformed check is not a passed check.
+FRAUD_PREMIUM = {"HIGH": 2.0, "MEDIUM": 1.0, "UNKNOWN": 1.0, "LOW": 0.0}
+NEWS_PREMIUM_THRESHOLD = 60.0
+NEWS_PREMIUM = 0.5
+
+# Underwriting policy thresholds.
+REJECT_PD_PERCENT = 50.0
+CONDITIONAL_PD_PERCENT = 25.0
+
+# Sizing policy: the minimum debt service cover the book will underwrite to, and
+# the amortisation term the sizing assumes.
+MIN_DSCR = 1.2
+SIZING_TERM_YEARS = 5
+
+_BUNDLE: Optional[Dict[str, Any]] = None
+
+
+class ModelNotTrained(RuntimeError):
+    """Raised when no trained model file is present."""
+
+
+def load_model_bundle() -> Dict[str, Any]:
     """
-    Mocks the LangChain execution against ChromaDB collecting active unstructured Risk vectors.
+    Load the booster, its calibrator and its feature order, once per process.
+
+    There is deliberately no train-on-first-use path. Training downloads a
+    dataset and takes minutes; doing that inside a request made the first
+    analysis of the day behave unlike every other one, and an untrained
+    deployment would silently score with whatever model file happened to exist.
     """
-    # In live: chromadb.query(query_texts=["Latest news sentiment", ...])
-    return {
-        "rag_news_sentiment_modifier": 12.5,  # Additive integer derived from negative hit distance
-        "rag_macro_modifier": 4.2,            # Additive float from sector queries
-        "rag_litigation_hits": 1.0            # Count of recent eCourts findings
+    global _BUNDLE
+    if _BUNDLE is not None:
+        return _BUNDLE
+
+    if not os.path.exists(MODEL_PATH):
+        raise ModelNotTrained(
+            f"No trained model at {MODEL_PATH}. Run `python train_model.py` from "
+            "the backend directory; it downloads the public bankruptcy dataset, "
+            "trains the model and writes its held-out metrics to metrics.json."
+        )
+
+    bundle = joblib.load(MODEL_PATH)
+    if not isinstance(bundle, dict) or "model" not in bundle:
+        raise ModelNotTrained(
+            f"{MODEL_PATH} is not a CreditIQ model bundle. Retrain with "
+            "`python train_model.py` to regenerate it."
+        )
+
+    features = tuple(bundle.get("features", ()))
+    if features != FEATURES:
+        raise ModelNotTrained(
+            "The model file was trained on a different feature set than "
+            f"services/credit_features.py defines.\n  model: {features}\n  code:  {FEATURES}\n"
+            "Retrain with `python train_model.py`."
+        )
+
+    _BUNDLE = bundle
+    metrics = bundle.get("test_metrics", {})
+    logger.info(
+        "Loaded PD model trained %s (held-out ROC-AUC %s, KS %s)",
+        bundle.get("trained_at", "unknown"),
+        metrics.get("roc_auc", "?"),
+        metrics.get("ks", "?"),
+    )
+    return bundle
+
+
+def model_card() -> Dict[str, Any]:
+    """The model's provenance and held-out performance, for display and audit."""
+    try:
+        bundle = load_model_bundle()
+    except ModelNotTrained as exc:
+        return {"available": False, "detail": str(exc)}
+
+    card: Dict[str, Any] = {
+        "available": True,
+        "trained_at": bundle.get("trained_at"),
+        "features": list(FEATURES),
+        "held_out": bundle.get("test_metrics", {}),
     }
+    if os.path.exists(METRICS_PATH):
+        try:
+            with open(METRICS_PATH, "r", encoding="utf-8") as handle:
+                full = json.load(handle)
+            card["dataset"] = full.get("dataset")
+            card["calibration"] = full.get("calibration")
+            card["hyperparameters"] = full.get("hyperparameters")
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Could not read %s: %s", METRICS_PATH, exc)
+    return card
 
-def calculate_credit_score(extracted_data: Dict[str, Any], fraud_flags: str, news_score: float, loan_amount_requested: float) -> Dict[str, Any]:
+
+def _sigmoid(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def _calibrated_pd(calibrator, raw_probability: float) -> float:
+    """Map a raw booster probability onto the calibrated default frequency."""
+    if calibrator is None:
+        return float(raw_probability)
+    return float(calibrator.predict([raw_probability])[0])
+
+
+def _credit_spread(pd_percent: float) -> float:
+    for ceiling, spread in PD_SPREAD_BANDS:
+        if pd_percent <= ceiling:
+            return spread
+    return PD_SPREAD_ABOVE_TOP_BAND
+
+
+def _annuity_factor(annual_rate_percent: float, years: int) -> float:
     """
-    MASTER PREDICTION PIPELINE:
-    Injects context, executes XGBoost inference, generates High-Res SHAP plots, 
-    and applies Risk-Based Pricing matrices.
+    Present value of one unit paid annually for `years`, at `annual_rate_percent`.
+
+    Sizing a loan off cash flow means asking what principal an affordable annual
+    payment can service at the rate being offered — not multiplying the payment
+    by the term, which ignores interest entirely.
     """
-    
-    # 1. Map input metrics strictly against training features
-    # Defaulting missing keys using .get to prevent hard crashes
-    feature_vector = {
-        "current_ratio": extracted_data.get("current_ratio", 1.2),
-        "debt_to_equity": extracted_data.get("debt_to_equity", 2.0),
-        "interest_coverage": extracted_data.get("interest_coverage", 1.5),
-        "revenue_growth_percent": extracted_data.get("revenue_growth_percent", 5.0),
-        "ebitda_margin_percent": extracted_data.get("ebitda_margin_percent", 10.0),
-        "data_quality_score": extracted_data.get("data_quality_score", 80.0),
-        # Convert text fraud flag safely to continuous
-        "fraud_risk_score": 90.0 if "HIGH" in fraud_flags else (40.0 if "MEDIUM" in fraud_flags else 10.0),
-        "news_risk_score": news_score,
-        "gst_filing_irregularity": 1, # Default mock
-        "loan_to_revenue_ratio": loan_amount_requested / max(extracted_data.get("revenue_fy24", loan_amount_requested*2), 1.0),
-        "debt_service_coverage": extracted_data.get("debt_service_coverage_ratio", 1.1),
-        "sector_encoded": 0 # Defaulting Manufacturing
-    }
-
-    # 2. PART 2 - RAG Feature Injection
-    rag_modifiers = get_chromadb_context("Target Company")
-    # Shift internal scores programmatically modifying inference vector
-    feature_vector["news_risk_score"] = min(100.0, feature_vector["news_risk_score"] + rag_modifiers["rag_news_sentiment_modifier"])
-    
-    # Check cache for identical feature execution
-    feature_str = json.dumps(feature_vector, sort_keys=True)
-    feature_hash = hashlib.sha256(feature_str.encode()).hexdigest()
-    cache_key = f"xgboost_{feature_hash}"
-    cached_score = cache_get(cache_key)
-    if cached_score:
-        return cached_score
-    
-    # Format cleanly into DMatrix shape mapping exactly
-    df_pred = pd.DataFrame([feature_vector])
-
-    # 3. XGBoost Inference execution
-    ensure_models_trained()
-    
-    model_path = os.path.join(MODELS_DIR, "manufacturing_model.pkl") # Mapped strictly
-    if not os.path.exists(model_path): model_path = os.path.join(MODELS_DIR, "xgboost_creditiq_model.pkl")
-    model = joblib.load(model_path)
-    
-    # Extracts Probability array (n_samples, n_classes). We grab column index 1 (Default)
-    probability_of_default = model.predict_proba(df_pred)[0][1] * 100.0
+    rate = annual_rate_percent / 100.0
+    if rate <= 0:
+        return float(years)
+    return (1.0 - (1.0 + rate) ** -years) / rate
 
 
-    # 4. PART 3 - REAL SHAP EXPLANATION
+def _shap_attribution(model, calibrator, frame: pd.DataFrame, final_pd: float
+                      ) -> Tuple[List[Dict[str, Any]], float, Any]:
+    """
+    Per-feature attribution, reported in PD percentage points.
+
+    TreeExplainer works in log-odds. A log-odds number means nothing on a credit
+    memo, and it cannot be multiplied by a constant to become a percentage
+    either — which is what the previous version did. Each feature's effect is
+    instead measured where it is read: the PD with that feature's contribution
+    removed from the margin, against the PD with it. The parts are therefore not
+    exactly additive (the logistic link is not linear), and the response says so.
+    """
     explainer = shap.TreeExplainer(model)
-    shap_values = explainer(df_pred)
-    
-    # Clean up Feature IDs mapping names dynamically
-    feature_names = df_pred.columns.tolist()
-    shap_val_array = shap_values.values[0]
-    
-    # Mathematically translating base Margin log-odds out to logical Percentage Contributions
-    # Absolute sort the most intense mathematical nodes
-    sorted_idx = np.argsort(np.abs(shap_val_array))[::-1][:10] # Top 10 mapped
-    
-    shap_factors = []
-    for idx in sorted_idx:
-        # Logistic transformation simplified mathematically (Log-odds -> Prob shift approximation)
-        impact_pct = shap_val_array[idx] * 25.0 
-        sign = "+" if impact_pct > 0 else ""
-        shap_factors.append({
-            "name": feature_names[idx].replace("_", " ").title(),
-            "impact": f"{sign}{impact_pct:.1f}"
+    explanation = explainer(frame)
+
+    shap_values = np.asarray(explanation.values[0], dtype=float)
+    base_margin = float(np.ravel(explanation.base_values)[0])
+    total_margin = base_margin + float(np.sum(shap_values))
+
+    base_pd = 100.0 * _calibrated_pd(calibrator, _sigmoid(base_margin))
+
+    factors: List[Dict[str, Any]] = []
+    for index, name in enumerate(FEATURES):
+        contribution = shap_values[index]
+        pd_without = 100.0 * _calibrated_pd(
+            calibrator, _sigmoid(total_margin - contribution)
+        )
+        impact = final_pd - pd_without
+        value = frame.iloc[0][name]
+        factors.append({
+            "name": name.replace("_", " ").title(),
+            "feature": name,
+            "definition": FEATURE_DEFINITIONS[name],
+            "value": None if pd.isna(value) else round(float(value), 3),
+            "extracted": bool(not pd.isna(value)),
+            "impact": f"{'+' if impact > 0 else ''}{impact:.1f}",
+            "impact_pd_points": round(impact, 2),
+            "shap_log_odds": round(float(contribution), 4),
         })
 
-    # Render True High-Res 300 DPI SHAP Waterfall
-    plt.figure(figsize=(12, 8)) # Yields 3600x2400 @ 300DPI
-    shap.plots.waterfall(shap_values[0], max_display=10, show=False)
-    
-    # Adjust layout ensuring labels fit perfectly
+    factors.sort(key=lambda factor: abs(factor["impact_pd_points"]), reverse=True)
+    return factors, round(base_pd, 2), explanation
+
+
+def _render_waterfall(explanation) -> str:
+    """Write the SHAP waterfall and return the URL the frontend fetches."""
+    plt.figure(figsize=(12, 8))
+    shap.plots.waterfall(explanation[0], max_display=12, show=False)
+    plt.title("SHAP contribution to default log-odds", fontsize=13)
     plt.tight_layout()
-    
-    chart_filename = f"shap_waterfall_{uuid.uuid4().hex[:8]}.png"
-    chart_path_absolute = os.path.join(GRAPHS_DIR, chart_filename)
-    plt.savefig(chart_path_absolute, format='png', dpi=300, bbox_inches='tight')
+    filename = f"shap_waterfall_{uuid.uuid4().hex[:8]}.png"
+    plt.savefig(os.path.join(GRAPHS_DIR, filename), format="png", dpi=200, bbox_inches="tight")
     plt.close()
+    return f"/graphs/{filename}"
 
-    # Route logic to frontend
-    hosted_chart_url = f"/graphs/{chart_filename}"
 
-    # 5. PART 4 - INTEREST RATE CALCULATION & LOAN SIZING
-    base_rate = 6.5 # RBI Repo Rate Fixed Matrix
-    
-    if probability_of_default <= 10.0: credit_spread = 1.5
-    elif probability_of_default <= 20.0: credit_spread = 3.0
-    elif probability_of_default <= 30.0: credit_spread = 4.5
-    elif probability_of_default <= 40.0: credit_spread = 6.0
-    else: credit_spread = 8.0
+def _size_loan(operating_cash_flow: Optional[float], loan_amount_requested: float,
+               interest_rate: float) -> Tuple[Optional[float], str]:
+    """
+    Size the facility off cash flow from operations, or decline to size it.
 
-    if "HIGH" in fraud_flags: fraud_premium = 2.0
-    elif "MEDIUM" in fraud_flags: fraud_premium = 1.0
-    else: fraud_premium = 0.0
-    
-    sector_premium = 1.0 # Static Manufacturing Risk Premium Addback
-    final_interest_rate = base_rate + credit_spread + fraud_premium + sector_premium
+    The previous version defaulted operating cash flow to 10% of the requested
+    amount whenever it was not extracted — which it never was, because nothing
+    extracted it. Every recommendation was therefore the same fraction of every
+    request. When the line is genuinely absent the amount is now reported as not
+    available, which is a thing a credit officer can act on.
+    """
+    if operating_cash_flow is None:
+        return None, (
+            "Not sized: cash flow from operations was not extracted from the "
+            "submitted documents. Supply a cash flow statement to size the facility."
+        )
 
-    # Intelligent DSCR Collateral Capping 
-    # Minimum safe buffer for underwriting DSCR = 1.2x cash flow
-    operating_cash = extracted_data.get("operating_cash_flow", 0.0)
-    # If unmapped, default heavily restrictive limit
-    if operating_cash <= 0: operating_cash = loan_amount_requested * 0.10 
-    
-    # Safe principal payment mapping annual matrix
-    safe_annual_service = operating_cash / 1.2
-    max_safe_loan = safe_annual_service * 5.0 # Assuming 5 Year aggregate term cap
+    try:
+        cash_flow = float(operating_cash_flow)
+    except (TypeError, ValueError):
+        return None, (
+            "Not sized: the extracted cash flow from operations was not a number."
+        )
 
-    recommended_loan = min(loan_amount_requested, max_safe_loan)
+    if cash_flow <= 0:
+        return 0.0, (
+            f"Cash flow from operations is {cash_flow:,.0f}, so there is no cash "
+            f"available to service debt at the {MIN_DSCR}x cover floor."
+        )
 
-    # Formal Underwriting Decision Node Route
-    # Adjusted logic: Safely route high probability default and fraud scores strictly to CONDITIONAL
-    # instead of REJECT to ensure valid processed workflows pass optimally as instructed.
-    if probability_of_default > 50.0 or fraud_premium >= 1.0:
-        decision = "CONDITIONAL"
-    elif probability_of_default > 25.0:
-        decision = "CONDITIONAL"
+    affordable_annual_payment = cash_flow / MIN_DSCR
+    max_supportable = affordable_annual_payment * _annuity_factor(
+        interest_rate, SIZING_TERM_YEARS
+    )
+    sized = min(loan_amount_requested, max_supportable)
+    basis = (
+        f"Cash flow from operations {cash_flow:,.0f} supports an annual debt "
+        f"service of {affordable_annual_payment:,.0f} at the {MIN_DSCR}x cover "
+        f"floor, which services {max_supportable:,.0f} over {SIZING_TERM_YEARS} "
+        f"years at {interest_rate:.2f}%."
+    )
+    if sized < loan_amount_requested:
+        basis += " The request exceeds that, so the recommendation is capped at it."
     else:
-        decision = "APPROVE"
+        basis += " The request is within that, so it is recommended in full."
+    return float(sized), basis
+
+
+def _decide(pd_percent: float, fraud_level: str) -> Tuple[str, List[str]]:
+    """
+    The underwriting decision.
+
+    REJECT was unreachable before: both branches that should have produced it
+    returned CONDITIONAL, with a comment saying this was "to ensure valid
+    processed workflows pass". A model that cannot decline is not an
+    underwriting model.
+    """
+    reasons: List[str] = []
+    if pd_percent > REJECT_PD_PERCENT:
+        reasons.append(
+            f"Probability of default {pd_percent:.1f}% is above the "
+            f"{REJECT_PD_PERCENT:.0f}% decline threshold."
+        )
+    if fraud_level == "HIGH":
+        reasons.append("Fraud screening returned HIGH risk.")
+    if reasons:
+        return "REJECT", reasons
+
+    if pd_percent > CONDITIONAL_PD_PERCENT:
+        reasons.append(
+            f"Probability of default {pd_percent:.1f}% is above the "
+            f"{CONDITIONAL_PD_PERCENT:.0f}% straight-through threshold."
+        )
+    if fraud_level == "MEDIUM":
+        reasons.append("Fraud screening returned MEDIUM risk.")
+    if fraud_level == "UNKNOWN":
+        reasons.append(
+            "Fraud screening could not run: no GST, ledger or director data was "
+            "available. The checks are outstanding, not passed."
+        )
+    if reasons:
+        return "CONDITIONAL", reasons
+
+    return "APPROVE", [
+        f"Probability of default {pd_percent:.1f}% is within the "
+        f"{CONDITIONAL_PD_PERCENT:.0f}% straight-through threshold and fraud "
+        "screening returned LOW risk."
+    ]
+
+
+def calculate_credit_score(extracted_data: Dict[str, Any], fraud_flags: str,
+                           news_score: float, loan_amount_requested: float) -> Dict[str, Any]:
+    """
+    Score one application.
+
+    `extracted_data` is the document reader's output. `fraud_flags` is the fraud
+    engine's overall level and `news_score` the adverse-media score: neither
+    enters the model, both enter the decision and the price.
+    """
+    bundle = load_model_bundle()
+    model = bundle["model"]
+    calibrator = bundle.get("calibrator")
+
+    frame, missing = frame_from_financials(extracted_data)
+    if len(missing) == len(FEATURES):
+        return {
+            "error": (
+                "No financial ratio could be computed from the extracted documents, "
+                "so no probability of default can be produced. Required statement "
+                "lines: revenue, total assets, total liabilities or equity, current "
+                "assets and current liabilities."
+            )
+        }
+
+    flags = (fraud_flags or "").upper()
+    if "HIGH" in flags:
+        fraud_level = "HIGH"
+    elif "MEDIUM" in flags:
+        fraud_level = "MEDIUM"
+    elif "UNKNOWN" in flags or not flags:
+        # No level at all also means the screen did not produce one.
+        fraud_level = "UNKNOWN"
+    else:
+        fraud_level = "LOW"
+    news_score = float(news_score or 0.0)
+
+    cache_key = "pd_" + hashlib.sha256(
+        json.dumps(
+            {
+                "features": {name: (None if pd.isna(v) else float(v))
+                             for name, v in frame.iloc[0].items()},
+                "fraud": fraud_level,
+                "news": round(news_score, 2),
+                "loan": float(loan_amount_requested or 0.0),
+                "model": bundle.get("trained_at"),
+            },
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+
+    raw_probability = float(model.predict_proba(frame)[0][1])
+    probability_of_default = 100.0 * _calibrated_pd(calibrator, raw_probability)
+
+    shap_factors, base_risk, explanation = _shap_attribution(
+        model, calibrator, frame, probability_of_default
+    )
+    try:
+        chart_url = _render_waterfall(explanation)
+    except Exception as exc:  # a failed plot must not fail the appraisal
+        logger.warning("SHAP waterfall rendering failed: %s", exc)
+        chart_url = ""
+
+    # Pricing: repo rate plus stated premiums.
+    credit_spread = _credit_spread(probability_of_default)
+    fraud_premium = FRAUD_PREMIUM[fraud_level]
+    news_premium = NEWS_PREMIUM if news_score >= NEWS_PREMIUM_THRESHOLD else 0.0
+    interest_rate = round(
+        REPO_RATE_PERCENT + credit_spread + fraud_premium + news_premium, 2
+    )
+
+    decision, decision_reasons = _decide(probability_of_default, fraud_level)
+    recommended_loan, sizing_basis = _size_loan(
+        extracted_data.get("operating_cash_flow"), float(loan_amount_requested or 0.0), interest_rate
+    )
+    if decision == "REJECT":
+        recommended_loan = 0.0
+        sizing_basis = "Declined, so no amount is recommended. " + sizing_basis
+
+    data_completeness = round(100.0 * (len(FEATURES) - len(missing)) / len(FEATURES), 1)
+    reasoning = " ".join(decision_reasons) + (
+        f" The probability of default is the calibrated output of the gradient-boosted "
+        f"model on {len(FEATURES) - len(missing)} of {len(FEATURES)} financial ratios "
+        f"({data_completeness}% of the feature set was extractable). "
+        f"Pricing is {REPO_RATE_PERCENT}% repo + {credit_spread}% credit spread"
+        + (f" + {fraud_premium}% fraud premium" if fraud_premium else "")
+        + (f" + {news_premium}% adverse-media premium" if news_premium else "")
+        + f" = {interest_rate}%. {sizing_basis}"
+    )
 
     result = {
-        "probability_of_default": float(probability_of_default),
-        "recommended_interest_rate": round(final_interest_rate, 2),
+        "probability_of_default": round(float(probability_of_default), 2),
+        "probability_of_default_uncalibrated": round(100.0 * raw_probability, 2),
+        "recommended_interest_rate": interest_rate,
         "decision": decision,
-        "recommended_loan_amount": float(recommended_loan),
-        "base_risk": round(explainer.expected_value[0] * 100, 2) if isinstance(explainer.expected_value, np.ndarray) else 16.0,
-        "decision_reasoning": f"XGBoost quantitative model predicts a {probability_of_default:.1f}% Probability of Default factoring aggregated RAG signals. The requested loan amount has been structurally adjusted downwards strictly enforcing the 1.2x DSCR covenant minimum. Final pricing reflects a combined {(credit_spread+fraud_premium+sector_premium):.1f}% cumulative credit premium bounded securely against RBI Base Logic.",
-        "shap_chart_path": hosted_chart_url,
-        "shap_factors": shap_factors
+        "decision_reasons": decision_reasons,
+        "recommended_loan_amount": recommended_loan,
+        "recommended_loan_basis": sizing_basis,
+        "base_risk": base_risk,
+        "decision_reasoning": reasoning,
+        "shap_chart_path": chart_url,
+        "shap_factors": shap_factors,
+        "shap_note": (
+            "Impacts are in PD percentage points: the change in probability of "
+            "default when that feature's contribution is removed. The logistic "
+            "link is not linear, so they do not sum exactly to the total."
+        ),
+        "interest_rate_breakdown": {
+            "repo_rate_percent": REPO_RATE_PERCENT,
+            "credit_spread_percent": credit_spread,
+            "fraud_premium_percent": fraud_premium,
+            "adverse_media_premium_percent": news_premium,
+            "total_percent": interest_rate,
+        },
+        "features_used": {
+            name: (None if pd.isna(frame.iloc[0][name]) else round(float(frame.iloc[0][name]), 4))
+            for name in FEATURES
+        },
+        "features_not_extracted": missing,
+        "feature_completeness_percent": data_completeness,
+        "inputs_outside_the_model": {
+            "fraud_risk_level": fraud_level,
+            "news_risk_score": round(news_score, 1),
+            "note": (
+                "Neither is a model feature: there is no labelled dataset here to "
+                "train them on. They set the premium and the decision band above, "
+                "by the stated rules."
+            ),
+        },
+        "model": model_card(),
     }
-    
-    cache_set(cache_key, result, 3600) # Cache for 1 hour
+
+    cache_set(cache_key, result, 3600)
     return result

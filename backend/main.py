@@ -2,9 +2,11 @@ from dotenv import load_dotenv
 load_dotenv()  # MUST be first — loads .env into os.environ before any service reads keys
 
 import traceback
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+
+from config import config
 
 print("=== STARTING CreditIQ BACKEND ===")
 
@@ -17,12 +19,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# Only the configured frontend origins. This was allow_origins=["*"] together
+# with allow_credentials=True — a combination browsers reject outright, and one
+# that states the intent to let any site on the internet call this API with the
+# user's credentials attached. Set CORS_ORIGINS in .env for other deployments.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -64,23 +70,37 @@ try:
 
     # === STEP B: ML Services & Routers ===
     from routers import upload, analyze, fraud, scoring, cam, ews, ws, history, ews_ws, health_live, auth, draft, chat, telegram, profile
+    from routers.auth import get_current_user
 
+    # Every router that touches borrower data requires a bearer token. Applied
+    # at registration so a new endpoint added to any of these routers is
+    # protected by default rather than by remembering to decorate it.
+    #
+    # Deliberately NOT in this list:
+    #   auth      — /login has to be reachable to obtain a token
+    #   telegram  — Telegram calls the webhook; it authenticates with
+    #               TELEGRAM_WEBHOOK_SECRET instead
+    #   ws, ews_ws, health_live — WebSocket handshakes cannot carry an
+    #               Authorization header, so those endpoints authenticate the
+    #               `token` query parameter themselves
+    authenticated = [Depends(get_current_user)]
 
-    app.include_router(upload.router, tags=["Upload"])
-    app.include_router(analyze.router, tags=["Analyze"])
-    app.include_router(fraud.router, tags=["Fraud"])
-    app.include_router(scoring.router, tags=["Scoring"])
-    app.include_router(cam.router, tags=["CAM"])
-    app.include_router(ews.router, tags=["EWS"])
-    app.include_router(history.router, tags=["History"])
-    app.include_router(ws.router)
+    app.include_router(upload.router, tags=["Upload"], dependencies=authenticated)
+    app.include_router(analyze.router, tags=["Analyze"], dependencies=authenticated)
+    app.include_router(fraud.router, tags=["Fraud"], dependencies=authenticated)
+    app.include_router(scoring.router, tags=["Scoring"], dependencies=authenticated)
+    app.include_router(cam.router, tags=["CAM"], dependencies=authenticated)
+    app.include_router(ews.router, tags=["EWS"], dependencies=authenticated)
+    app.include_router(history.router, tags=["History"], dependencies=authenticated)
+    app.include_router(draft.router, dependencies=authenticated)
+    app.include_router(chat.router, tags=["Chat"], dependencies=authenticated)
+    app.include_router(profile.router, tags=["Profile"], dependencies=authenticated)
+
     app.include_router(auth.router)
+    app.include_router(ws.router)
     app.include_router(ews_ws.router)
     app.include_router(health_live.router)
-    app.include_router(draft.router)
-    app.include_router(chat.router, tags=["Chat"])
     app.include_router(telegram.router, tags=["Telegram"])
-    app.include_router(profile.router, tags=["Profile"])
 
     print("All components loaded. Server ready to listen on $PORT.")
 

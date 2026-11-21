@@ -5,6 +5,7 @@ import {
   TrendingUp, ShieldCheck, Activity, WifiOff, RefreshCw,
 } from 'lucide-react';
 import { acknowledgeAlert } from '../services/ewsApi';
+import { wsUrlWithToken } from '../services/apiConfig';
 import './WarningSystem.css';
 
 /* ── helpers ──────────────────────────────────────────── */
@@ -101,12 +102,11 @@ function WarningSystem() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const WS_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/^http/, 'ws');
 
   const connect = useCallback(() => {
     if (reconnTimer.current) clearTimeout(reconnTimer.current);
     setWsStatus('connecting');
-    const ws = new WebSocket(`${WS_BASE}/ws/ews/${companyId}`);
+    const ws = new WebSocket(wsUrlWithToken(`/ws/ews/${companyId}`));
     wsRef.current = ws;
 
     ws.onopen = () => setWsStatus('live');
@@ -143,7 +143,7 @@ function WarningSystem() {
       reconnTimer.current = setTimeout(connect, 5000);
     };
     ws.onerror = () => ws.close();
-  }, [companyId, WS_BASE]);
+  }, [companyId]);
 
   useEffect(() => {
     connect();

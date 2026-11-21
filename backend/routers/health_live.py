@@ -8,9 +8,11 @@ import time
 import asyncio
 import logging
 from datetime import datetime
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import text
 from database import SessionLocal
+from routers.auth import get_current_user
+from utils.auth import authenticate_websocket
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -85,26 +87,28 @@ def check_xgboost() -> dict:
         # looked for models/credit_model.json with a 15-feature DMatrix — a file
         # and shape this project has never used — so it always reported
         # "model_file_missing" even with scoring working perfectly.
-        import joblib
+        from services import scoring_service
 
-        models_dir = os.path.join(os.getcwd(), "models", "xgboost")
-        candidates = ["xgboost_creditiq_model.pkl", "manufacturing_model.pkl"]
-        model_path = next(
-            (os.path.join(models_dir, c) for c in candidates
-             if os.path.exists(os.path.join(models_dir, c))),
-            None,
-        )
-        if model_path is None:
-            return {"status": "model_file_missing", "prediction_time_ms": None}
+        try:
+            bundle = scoring_service.load_model_bundle()
+        except scoring_service.ModelNotTrained as exc:
+            return {
+                "status": "model_file_missing",
+                "detail": str(exc),
+                "prediction_time_ms": None,
+            }
 
-        model = joblib.load(model_path)
-        feature_names = model.get_booster().feature_names
+        feature_names = bundle["features"]
         dummy = pd.DataFrame([{name: 0.0 for name in feature_names}])
-        _ = model.predict_proba(dummy)
+        _ = bundle["model"].predict_proba(dummy)
+        held_out = bundle.get("test_metrics", {})
         return {
             "status": "loaded",
-            "model": os.path.basename(model_path),
+            "model": os.path.basename(scoring_service.MODEL_PATH),
+            "trained_at": bundle.get("trained_at"),
             "features": len(feature_names),
+            "held_out_roc_auc": held_out.get("roc_auc"),
+            "held_out_ks": held_out.get("ks"),
             "prediction_time_ms": round((time.time() - t0) * 1000, 1),
         }
     except Exception as e:
@@ -216,8 +220,15 @@ def run_all_checks() -> dict:
 # ──────────────────────────────────────────────────────
 
 @router.get("/api/health/live")
-async def live_health():
-    """Real-time health check of every backend component."""
+async def live_health(_: str = Depends(get_current_user)):
+    """
+    Real-time health check of every backend component.
+
+    Authenticated: the response enumerates which third-party credentials are
+    configured, the Twilio account balance and the model on disk, which is an
+    inventory of the deployment that no anonymous caller needs. The unauthenticated
+    liveness probe is GET /health in main.py.
+    """
     result = await asyncio.to_thread(run_all_checks)
     
     comps = result["components"]
@@ -236,7 +247,9 @@ async def live_health():
 # ──────────────────────────────────────────────────────
 
 @router.websocket("/ws/health")
-async def health_websocket(websocket: WebSocket):
+async def health_websocket(websocket: WebSocket, token: str = Query(None)):
+    if await authenticate_websocket(websocket, token) is None:
+        return
     await websocket.accept()
     logger.info("Health WebSocket connected.")
     try:

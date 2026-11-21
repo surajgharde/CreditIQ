@@ -48,9 +48,13 @@ def get_analysis_results(analysis_id: int, db: Session = Depends(get_db)):
         with open(json_path, "r") as f:
             dashboard_data = json.load(f)
             
-    base_risk = dashboard_data.get("shap", {}).get("base_risk", 16.0)
-    final_pd = analysis.probability_of_default or 31.0
-    
+    # No invented stand-ins: a missing base risk or PD is reported as null, not
+    # as the 16.0 / 31.0 placeholders that used to appear here and render as a
+    # real reading on the dashboard gauge.
+    shap_data = dashboard_data.get("shap", {})
+    base_risk = shap_data.get("base_risk")
+    final_pd = analysis.probability_of_default
+
     return {
         "company": {
             "company_name": company.company_name,
@@ -72,18 +76,24 @@ def get_analysis_results(analysis_id: int, db: Session = Depends(get_db)):
         },
         "shap": {
             "shap_chart_url": f"/api/shap-chart/{analysis.id}",
-            "shap_factors": dashboard_data.get("shap", {}).get("shap_factors", []),
+            "shap_factors": shap_data.get("shap_factors", []),
             "base_risk": base_risk,
-            "final_pd": final_pd
+            "final_pd": final_pd,
+            "note": shap_data.get("note"),
         },
         "news": {
             "news_risk_score": analysis.news_risk_score,
-            "top_signals": dashboard_data.get("news_signals", [])
+            "top_signals": dashboard_data.get("news_signals", []),
+            "news_data_available": dashboard_data.get("news_data_available", True),
         },
+        "model": dashboard_data.get("model", {}),
+        "features_not_extracted": dashboard_data.get("features_not_extracted", []),
+        "feature_completeness_percent": dashboard_data.get("feature_completeness_percent"),
+        "fraud_data_synthetic": dashboard_data.get("fraud_data_synthetic", False),
         "recommendation": dashboard_data.get("recommendation", {
             "decision_reasoning": "Analysis generated via automated ML pipeline.",
             "conditions": [],
-            "loan_tenure": 3,
+            "loan_tenure": 5,
             "interest_rate_breakdown": "Base Rate + Risk Premium"
         })
     }

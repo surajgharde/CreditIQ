@@ -1,0 +1,150 @@
+{
+  "trained_at": "2026-11-21T13:41:03+00:00",
+  "dataset": {
+    "name": "Polish companies bankruptcy data",
+    "url": "https://archive.ics.uci.edu/dataset/365",
+    "citation": "Zieba, M., Tomczak, S. K., & Tomczak, J. M. (2016). Ensemble boosted trees with synthetic features generation in application to bankruptcy prediction. Expert Systems with Applications. UCI ML Repository dataset 365.",
+    "files_pooled": [
+      "1year.arff",
+      "2year.arff",
+      "3year.arff",
+      "4year.arff",
+      "5year.arff"
+    ],
+    "label": "company entered bankruptcy within the file's forecast horizon",
+    "rows_used": 43405
+  },
+  "features": [
+    "current_ratio",
+    "quick_ratio",
+    "debt_to_assets",
+    "debt_to_equity",
+    "interest_coverage",
+    "gross_margin_percent",
+    "ebitda_margin_percent",
+    "net_margin_percent",
+    "return_on_assets_percent",
+    "asset_turnover",
+    "working_capital_to_assets",
+    "cash_flow_to_debt"
+  ],
+  "feature_source_map": {
+    "current_ratio": "Attr4",
+    "quick_ratio": "Attr46",
+    "debt_to_assets": "Attr2",
+    "interest_coverage": "Attr27",
+    "gross_margin_percent": "Attr19",
+    "ebitda_margin_percent": "Attr49",
+    "net_margin_percent": "Attr23",
+    "return_on_assets_percent": "Attr1",
+    "asset_turnover": "Attr9",
+    "working_capital_to_assets": "Attr3",
+    "cash_flow_to_debt": "Attr26",
+    "debt_to_equity": "Attr2 / Attr10"
+  },
+  "hyperparameters": {
+    "n_estimators_requested": 600,
+    "best_iteration": 198,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 5,
+    "reg_lambda": 2.0,
+    "scale_pos_weight": 19.7616,
+    "early_stopping_rounds": 40,
+    "seed": 42
+  },
+  "split": {
+    "train": 0.64,
+    "validation": 0.16,
+    "test": 0.2,
+    "stratified": true
+  },
+  "calibration": {
+    "method": "isotonic regression",
+    "fitted_on": "validation slice (16% of all rows), never the test set",
+    "reason": "scale_pos_weight makes predict_proba exceed the real default frequency; the PD quoted downstream is the calibrated value"
+  },
+  "test": {
+    "roc_auc": 0.888,
+    "ks": 0.6018,
+    "average_precision": 0.4592,
+    "brier": 0.033,
+    "n": 8681,
+    "n_default": 418,
+    "default_rate_percent": 4.82,
+    "brier_uncalibrated": 0.1124,
+    "roc_auc_uncalibrated": 0.8898
+  },
+  "validation": {
+    "roc_auc": 0.8955,
+    "ks": 0.6044,
+    "average_precision": 0.4718,
+    "brier": 0.0322,
+    "n": 6945,
+    "n_default": 335,
+    "default_rate_percent": 4.82
+  },
+  "test_per_horizon": {
+    "1year.arff": {
+      "roc_auc": 0.9188,
+      "ks": 0.6598,
+      "average_precision": 0.6093,
+      "brier": 0.0235,
+      "n": 1426,
+      "n_default": 61,
+      "default_rate_percent": 4.28
+    },
+    "2year.arff": {
+      "roc_auc": 0.8779,
+      "ks": 0.592,
+      "average_precision": 0.5021,
+      "brier": 0.026,
+      "n": 2030,
+      "n_default": 81,
+      "default_rate_percent": 3.99
+    },
+    "3year.arff": {
+      "roc_auc": 0.8863,
+      "ks": 0.6205,
+      "average_precision": 0.4416,
+      "brier": 0.0311,
+      "n": 2142,
+      "n_default": 96,
+      "default_rate_percent": 4.48
+    },
+    "4year.arff": {
+      "roc_auc": 0.8772,
+      "ks": 0.5722,
+      "average_precision": 0.4207,
+      "brier": 0.0424,
+      "n": 1913,
+      "n_default": 111,
+      "default_rate_percent": 5.8
+    },
+    "5year.arff": {
+      "roc_auc": 0.8867,
+      "ks": 0.6018,
+      "average_precision": 0.3856,
+      "brier": 0.045,
+      "n": 1170,
+      "n_default": 69,
+      "default_rate_percent": 5.9
+    }
+  },
+  "feature_importance": {
+    "interest_coverage": 0.223,
+    "cash_flow_to_debt": 0.1482,
+    "asset_turnover": 0.1012,
+    "debt_to_assets": 0.0927,
+    "quick_ratio": 0.0892,
+    "net_margin_percent": 0.0656,
+    "ebitda_margin_percent": 0.0538,
+    "return_on_assets_percent": 0.0523,
+    "gross_margin_percent": 0.0508,
+    "working_capital_to_assets": 0.0462,
+    "current_ratio": 0.0413,
+    "debt_to_equity": 0.0358
+  }
+}

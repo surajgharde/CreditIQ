@@ -1,6 +1,8 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from typing import Dict
 import logging
+
+from utils.auth import authenticate_websocket
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,12 @@ manager = ConnectionManager()
 router = APIRouter(prefix="/ws", tags=["WebSockets"])
 
 @router.websocket("/analysis/{analysis_id}")
-async def websocket_endpoint(websocket: WebSocket, analysis_id: str):
+async def websocket_endpoint(websocket: WebSocket, analysis_id: str, token: str = Query(None)):
+    # The progress stream names the borrower and its figures, so it needs the
+    # same token the REST endpoints need. A WebSocket handshake cannot carry an
+    # Authorization header, so the token comes in the query string.
+    if await authenticate_websocket(websocket, token) is None:
+        return
     await manager.connect(websocket, analysis_id)
     try:
         while True:

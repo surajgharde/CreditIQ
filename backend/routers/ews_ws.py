@@ -13,13 +13,13 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timedelta
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models.company import Company
 from models.analysis import Analysis
 from models.ews import EWSSignal, EWSTrajectory
-import random
+from utils.auth import authenticate_websocket
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -236,27 +236,20 @@ def _enrich_with_live_apis(base_payload: dict) -> dict:
     except Exception as e:
         logger.warning(f"Live court signal failed: {e}")
 
-    # --- Add Random Jitter to all signals to make it look "Alive" ---
-    # This prevents the "always 31%" issue by adding +/- 0.8% drift
-    for s in signals:
-        drift = (random.random() - 0.5) * 1.6
-        s["score"] = round(max(0.0, min(100.0, s["score"] + drift)), 1)
-        # Update last updated to now
-        s["last_updated"] = datetime.now().isoformat()
-
-    # Apply drift to Current PD as well
-    pd_drift = (random.random() - 0.5) * 1.2
-    base_payload["trajectory"]["current_pd"] = round(max(1.0, min(99.0, base_payload["trajectory"]["current_pd"] + pd_drift)), 1)
-
+    # No jitter is applied here. A random +/-0.8% drift used to be added to every
+    # signal score and to the current PD "to make it look alive", on a panel
+    # labelled LIVE — so the number on screen moved when nothing had changed, and
+    # a reader could not tell a real movement from the noise. A score that holds
+    # still is the correct display for a signal that has not moved; only the
+    # signals actually refreshed above carry a new timestamp.
     base_payload["signals"] = signals
     base_payload["data_source"] = "LIVE [APIs + DB]"
     base_payload["timestamp"] = datetime.now().isoformat()
 
-    # Recalculate overall
     if signals:
-        raw_avg = sum(s["score"] for s in signals) / len(signals)
-        # Added a tiny drift to the overall score itself for extra "alive" feel
-        base_payload["summary"]["overall_ews_score"] = round(raw_avg + (random.random() - 0.5) * 0.5, 1)
+        base_payload["summary"]["overall_ews_score"] = round(
+            sum(s["score"] for s in signals) / len(signals), 1
+        )
     return base_payload
 
 
@@ -308,7 +301,12 @@ def _fire_alert_if_needed(payload: dict):
 # ──────────────────────────────────────────────────────
 
 @router.websocket("/ws/ews/{company_id}")
-async def ews_websocket(websocket: WebSocket, company_id: int):
+async def ews_websocket(websocket: WebSocket, company_id: int, token: str = Query(None)):
+    # Authenticated from the `token` query parameter: a WebSocket handshake
+    # cannot carry an Authorization header, and this stream carries one
+    # borrower's monitoring signals.
+    if await authenticate_websocket(websocket, token) is None:
+        return
     await websocket.accept()
     logger.info(f"EWS WebSocket connected: company_id={company_id}")
 

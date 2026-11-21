@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import api from '../services/apiConfig';
+import api, { TOKEN_KEY } from '../services/apiConfig';
 
-const TOKEN_KEY = 'creditiq_token';
 const USER_KEY = 'admin_user';
 
 interface AuthUser {

@@ -12,6 +12,27 @@ const isHttps = BASE_URL.startsWith('https');
 const wsBase = BASE_URL.replace(/^https?:\/\//, isHttps ? 'wss://' : 'ws://');
 export const WS_URL = wsBase;
 
+/** Where AuthContext stores the bearer token. */
+export const TOKEN_KEY = 'creditiq_token';
+
+/**
+ * A WebSocket URL carrying the bearer token.
+ *
+ * The backend requires a token on every stream, and a browser cannot set an
+ * Authorization header on a WebSocket handshake, so it travels in the query
+ * string instead. Pass a path such as `/ws/ews/12`.
+ */
+export const wsUrlWithToken = (path: string): string => {
+  let token: string | null = null;
+  try {
+    token = localStorage.getItem(TOKEN_KEY);
+  } catch {
+    token = null;
+  }
+  const separator = path.includes('?') ? '&' : '?';
+  return `${WS_URL}${path}${token ? `${separator}token=${encodeURIComponent(token)}` : ''}`;
+};
+
 // ─── Global Axios Instance ────────────────────────────────────────────────────
 const api = axios.create({
   // Point directly to backend URL

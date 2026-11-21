@@ -58,12 +58,14 @@ STATEMENT_LINES = [
     "revenue_fy24", "cogs", "gross_profit", "ebitda", "ebit", "net_profit",
     "total_assets", "total_liabilities", "total_equity", "total_debt",
     "current_assets", "current_liabilities", "cash_equivalents", "interest_expense",
+    "inventory", "operating_cash_flow",
 ]
 
 # Ratios ocr_service derives when the inputs are present.
 RATIO_LINES = [
     "current_ratio", "debt_to_equity", "interest_coverage", "tol_tnw",
     "ebitda_margin_percent", "gross_profit_margin_percent", "net_profit_margin_percent",
+    "cash_flow_to_debt", "operating_cash_flow_to_interest",
 ]
 
 RBI_GUIDELINES = "RBI Master Circular 2024: Banks/NBFCs are advised to monitor end-use of funds rigorously. High propensity of GST mismatches and circular trading in SME MSME lending must attract enhanced due diligence. DSCR must strictly maintain at or above 1.2x. LTV on tangible fixed assets not to exceed 75%."
@@ -206,7 +208,7 @@ def make_page_decorator(company_name: str):
 
 def construct_rag_context(analysis_data: dict) -> str:
     """
-    Builds the 4-Level Context framework mapping into Claude Native RAG.
+    Builds the 4-Level Context framework passed to Cohere as retrieval context.
     """
     # Level 1: Raw Financials
     company = analysis_data.get("company", {})

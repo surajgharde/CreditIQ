@@ -25,7 +25,7 @@ async def pump_ws_progress(analysis_id: int):
             await asyncio.sleep(1)
             await manager.send_personal_message({
                 "step_number": 7,
-                "step_name": "Claude AI CAM Generation",
+                "step_name": "Cohere CAM Generation",
                 "step_detail": f"Structuring document vectors... {pct}%",
                 "percentage": pct,
                 "status": "running",
@@ -71,7 +71,7 @@ async def generate_cam_document(analysis_id: int, body: CAMRequest = CAMRequest(
     decision_info = results_data.get("recommendation", {})
     shap_info = results_data.get("shap", {})
     
-    # Pack data strictly mapping what the Claude Engine needs
+    # Pack data strictly mapping what the CAM generator needs
     analysis_data = {
         "company": {
             "company_name": company.company_name,
@@ -81,12 +81,18 @@ async def generate_cam_document(analysis_id: int, body: CAMRequest = CAMRequest(
             "loan_amount_requested": company.loan_amount_requested
         },
         "fraud": {
-            "overall_fraud_risk": fraud_data.get("fraud_risk_level", "LOW"),
-            "signals": fraud_data.get("signals", [])
+            "overall_fraud_risk": fraud_data.get("fraud_risk_level", "UNKNOWN"),
+            "signals": fraud_data.get("signals", []),
+            "checks_run": fraud_data.get("checks_run"),
+            "checks_total": fraud_data.get("checks_total"),
+            # So the memo can say a signal was generated rather than found.
+            "contains_synthetic_signals": fraud_data.get("fraud_data_synthetic", False),
+            "synthetic_signal_types": fraud_data.get("synthetic_signal_types", []),
         },
         "news": {
             "news_risk_score": analysis.news_risk_score,
-            "top_signals": results_data.get("news_signals", [])
+            "top_signals": results_data.get("news_signals", []),
+            "news_data_available": results_data.get("news_data_available", True),
         },
         "shap": {
             "shap_chart_url": shap_info.get("shap_chart_url"),
@@ -119,7 +125,7 @@ async def generate_cam_document(analysis_id: int, body: CAMRequest = CAMRequest(
     # Send absolute completion ping
     await manager.send_personal_message({
         "step_number": 7,
-        "step_name": "Claude AI CAM Generation",
+        "step_name": "Cohere CAM Generation",
         "step_detail": "Complete.",
         "percentage": 100,
         "status": "completed",
@@ -234,8 +240,4 @@ def preview_cam(analysis_id: int, db: Session = Depends(get_db)):
 
     return {
         "executive_summary": recommendation.get("decision_reasoning", "Analysis results pending final review."),
-        "decision": analysis.decision or "PENDING",
-        "key_findings": findings,
-        "fraud_summary": f"Integrity check returned risk level {fraud_val}. Specific evidence found in {len(fraud_data.get('signals', [])) if isinstance(fraud_data, dict) else 0} signals.",
-        "credit_score_summary": f"XGBoost Model evaluated final PD at {pd_val:.1f}%. Top factor: {shap.get('shap_factors', ['None'])[0] if isinstance(shap, dict) and shap.get('shap_factors') else 'N/A'}."
-    }
+        "decision": analysis.decis

@@ -16,6 +16,22 @@ function colorByRisk(r: string) {
 }
 function crore(n: number) { return (n / 10000000).toFixed(1); }
 
+/**
+ * The recommended amount, or why there isn't one.
+ *
+ * The backend returns null when cash flow from operations could not be read out
+ * of the submitted documents, because the sizing is a debt service calculation
+ * and there is nothing to base it on. Rendering that as "₹NaN Crore" — or, as
+ * the backend used to, substituting 10% of the request and quietly sizing every
+ * facility at 41.7% of what was asked — is worse than saying so.
+ */
+function recommendedAmount(n: number | null | undefined) {
+  if (n === null || n === undefined || Number.isNaN(Number(n))) {
+    return 'Not sized — cash flow from operations not extracted';
+  }
+  return `₹${crore(Number(n))} Crore`;
+}
+
 function Dashboard() {
   const [searchParams] = useSearchParams();
   const analysisId = Number(searchParams.get('id') || '1');
@@ -95,6 +111,26 @@ function Dashboard() {
 
   const shapUrl = getSHAPChartUrl(analysisId);
 
+  // Caveats the report carries. Shown above the decision, because each one
+  // changes how much weight the decision can bear.
+  const caveats: string[] = [];
+  if (data?.fraud_data_synthetic) {
+    caveats.push('Demo mode: some fraud signals below are SYNTHETIC generated data, not real findings.');
+  }
+  if (fraud?.overall_fraud_risk === 'UNKNOWN') {
+    caveats.push('Fraud screening could not run — the GST, ledger and director checks are outstanding, not passed.');
+  }
+  if (data?.news && data.news.news_data_available === false) {
+    caveats.push('No news coverage was found for this company, so the adverse-media check returned nothing to score.');
+  }
+  if (data?.features_not_extracted?.length) {
+    caveats.push(
+      `${data.features_not_extracted.length} of 12 financial ratios could not be read from the documents` +
+      (data.feature_completeness_percent != null ? ` (${data.feature_completeness_percent}% complete): ` : ': ') +
+      data.features_not_extracted.join(', ')
+    );
+  }
+
   return (
     <div className="dashboard-page">
       <nav className="navbar">
@@ -112,6 +148,22 @@ function Dashboard() {
       </nav>
 
       <div className="container">
+        {caveats.length > 0 && (
+          <div
+            style={{
+              background: '#FFFBEB', border: '1px solid #F59E0B', borderRadius: 8,
+              padding: '0.9rem 1.1rem', marginBottom: '1rem', color: '#92400E',
+            }}
+          >
+            <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <AlertTriangle size={16} /> Read this decision with the following in mind
+            </div>
+            <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.85rem', lineHeight: 1.5 }}>
+              {caveats.map((c, i) => <li key={i}>{c}</li>)}
+            </ul>
+          </div>
+        )}
+
         {/* Real Decision Banner */}
         <div className="alert-banner" style={{ backgroundColor: bannerStyle.bg, borderColor: bannerStyle.border }}>
           <div className="alert-content">
@@ -120,7 +172,7 @@ function Dashboard() {
               {decision.decision}
             </div>
             <div className="alert-details">
-              <div>Recommended Amount: <span style={{ color: bannerStyle.text }}>₹{crore(decision.recommended_loan_amount)} Crore</span></div>
+              <div>Recommended Amount: <span style={{ color: bannerStyle.text }}>{recommendedAmount(decision.recommended_loan_amount)}</span></div>
               <div>Interest Rate: <span style={{ color: bannerStyle.text }}>{decision.recommended_interest_rate}% per annum</span></div>
             </div>
           </div>
@@ -169,7 +221,7 @@ function Dashboard() {
           {/* SHAP Chart & Factors */}
           <div className="chart-card">
             <div className="card-title" style={{ color: '#115e59' }}>SHAP Decision Explanation</div>
-            <div className="card-subtitle">Real high-res XGBoost SHAP Waterfall</div>
+            <div className="card-subtitle">XGBoost SHAP waterfall, in default log-odds</div>
 
             {/* Real Image Render */}
             <div style={{ position: 'relative', width: '100%', paddingBottom: '20px', minHeight: 150, display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#F8FAFC', borderRadius: 8, marginBottom: 16 }}>
@@ -213,7 +265,16 @@ function Dashboard() {
                 );
               })}
               <div className="shap-footer">
-                <div className="shap-footer-text">Base Risk {shap.base_risk}% + Adjustments = <span>Final PD {shap.final_pd?.toFixed(1)}%</span></div>
+                {/*
+                  Impacts are in PD percentage points — the change in PD when
+                  that ratio's contribution is removed. The logistic link is not
+                  linear, so they do not sum exactly to the difference; the text
+                  no longer claims they do.
+                */}
+                <div className="shap-footer-text">
+                  Model base rate {shap.base_risk != null ? `${shap.base_risk}%` : 'n/a'} → <span>Final PD {shap.final_pd?.toFixed(1)}%</span>
+                  {shap.note && <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: 4, fontWeight: 400 }}>{shap.note}</div>}
+                </div>
               </div>
             </div>
           </div>
@@ -224,10 +285,14 @@ function Dashboard() {
             <div className="card-subtitle">Aggregated Fraud & Market Intelligence</div>
             <div className="signals-list">
               {allSignals.length === 0 ? (
+                // "100% Clean Application" overstated this: no signal can mean
+                // the checks ran and found nothing, or that they could not run.
+                // The signal list itself says which, so this says only what it
+                // knows.
                 <div style={{ padding: '2rem', textAlign: 'center', color: '#16A34A', background: '#F0FDF4', borderRadius: 8, marginTop: 16 }}>
                   <CheckCircle2 size={32} style={{ margin: '0 auto 8px auto' }} />
-                  <div style={{ fontWeight: 600 }}>100% Clean Application</div>
-                  <div style={{ fontSize: '0.85rem', marginTop: 4 }}>No fraud or severe market signals detected across our database.</div>
+                  <div style={{ fontWeight: 600 }}>No risk signals raised</div>
+                  <div style={{ fontSize: '0.85rem', marginTop: 4 }}>No fraud or adverse-media signal was returned for this application.</div>
                 </div>
               ) : (
                 allSignals.slice(0, 5).map((s, i) => (

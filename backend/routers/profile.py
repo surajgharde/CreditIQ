@@ -7,11 +7,12 @@ read which borrower's file over Telegram.
 """
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database import get_db
+from routers.auth import get_current_user
 from models.company import Company
 from models.telegram_link import TelegramLink
 from services import telegram_service
@@ -21,9 +22,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/profile", tags=["Profile"])
 
 
-def get_current_user_email(x_user_email: str = Header(None)) -> str:
-    """Matches the convention already used by the drafts router."""
-    return x_user_email or "admin@gmail.com"
+# Identity comes from the bearer token. This used to read an X-User-Email
+# header, defaulting to admin@gmail.com — so any caller could manage the
+# Telegram chat links that decide which chat may read which borrower's file.
+get_current_user_email = get_current_user
 
 
 class TelegramLinkCreate(BaseModel):

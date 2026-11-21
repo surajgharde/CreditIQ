@@ -2,7 +2,7 @@
  * FILE 2 — analysisApi.ts
  * Trigger analysis, poll status, and connect WebSocket for real-time step updates.
  */
-import api, { WS_URL } from './apiConfig';
+import api, { wsUrlWithToken } from './apiConfig';
 
 export interface AnalysisStatus {
   analysis_id: number;
@@ -76,7 +76,7 @@ export function connectAnalysisWebSocket(
   onError: (msg: string) => void,
   onClose?: () => void
 ): () => void {
-  const wsUrl = `${WS_URL}/ws/analysis/${analysisId}`;
+  const wsUrl = wsUrlWithToken(`/ws/analysis/${analysisId}`);
   let ws: WebSocket | null = null;
 
   try {

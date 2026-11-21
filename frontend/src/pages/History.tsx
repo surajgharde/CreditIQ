@@ -98,7 +98,9 @@ function History({ hideNavbar = false }: { hideNavbar?: boolean }) {
         catch { return 'Unknown'; }
     };
 
-    const fmtAmount = (n?: number) => n ? `₹${(n / 100000).toFixed(1)} L` : '-';
+    // null means the facility could not be sized (no cash flow from operations
+    // extracted), which reads as '-' here rather than as a zero amount.
+    const fmtAmount = (n?: number | null) => n ? `₹${(n / 100000).toFixed(1)} L` : '-';
 
     const getStatusBadge = (status: string, reason?: string) => {
         // A completed run can still carry a failure reason: scoring succeeded but a

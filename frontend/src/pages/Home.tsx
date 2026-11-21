@@ -66,7 +66,7 @@ function Home() {
         {/* ─── TECH RIBBON ──────────────────────────────────────── */}
         <div className="creditiq-ribbon">
           <div className="creditiq-ribbon__inner">
-            {['PdfTable', 'XGBoost', 'SHAP', 'LangChain', 'FinBERT', 'Cohere', 'ChromaDB', 'AWS Textract'].map(t => (
+            {['pdfplumber', 'Tesseract', 'AWS Textract', 'XGBoost', 'SHAP', 'FinBERT', 'Cohere', 'ChromaDB'].map(t => (
               <span key={t} className="creditiq-ribbon__item">{t}</span>
             ))}
           </div>
@@ -82,10 +82,15 @@ function Home() {
               whileInView="visible"
               viewport={{ once: true, margin: '-60px' }}
             >
+              {/*
+                These read off the code. They replace "94%+ Fraud Detection
+                Accuracy" and "20%+ Better Default Prediction via RAG", neither of
+                which was ever measured anywhere in this project.
+              */}
               {[
-                { icon: <Zap size={26} />, value: '2 Hours', desc: 'CAM Generation vs. 5 Days Manual', color: '#14b8a6' },
-                { icon: <Shield size={26} />, value: '94%+', desc: 'Fraud Detection Accuracy', color: '#10b981' },
-                { icon: <TrendingUp size={26} />, value: '20%+', desc: 'Better Default Prediction via RAG', color: '#f59e0b' },
+                { icon: <Zap size={26} />, value: '6 Steps', desc: 'Document reading, fraud, news, scoring, memo, monitoring', color: '#14b8a6' },
+                { icon: <Shield size={26} />, value: '3 Checks', desc: 'GST mismatch, circular trading, director history — each reports UNKNOWN when its data is missing', color: '#10b981' },
+                { icon: <TrendingUp size={26} />, value: 'ROC-AUC 0.89', desc: 'Held-out default discrimination, KS 0.60', color: '#f59e0b' },
               ].map(({ icon, value, desc, color }) => (
                 <motion.div
                   key={value}
@@ -167,10 +172,11 @@ function Home() {
               whileInView="visible"
               viewport={{ once: true, margin: '-80px' }}
             >
-              <div className="creditiq-section__label">RESEARCH</div>
-              <h2 className="creditiq-section__title">Built on Peer-Reviewed AI Research</h2>
+              <div className="creditiq-section__label">UNDER THE HOOD</div>
+              <h2 className="creditiq-section__title">What Each Stage Actually Runs</h2>
               <p className="creditiq-section__subtitle">
-                Every CreditIQ engine is grounded in published research, fine-tuned for India's credit markets.
+                The model, the dataset it was trained on and the measured result, for every
+                stage of the pipeline.
               </p>
             </motion.div>
 
@@ -181,14 +187,53 @@ function Home() {
               whileInView="visible"
               viewport={{ once: true, margin: '-60px' }}
             >
+              {/*
+                Every claim below is checkable against the code. The earlier version
+                of this section said the scoring model was "trained on CIBIL + RBI NPA
+                datasets" with "AUC 0.91", that FinBERT was "fine-tuned on Indian
+                market corpus", that ChromaDB held "historical NPA case studies", and
+                listed a paper count per card — none of which existed in the
+                repository, and two of the six cards named libraries (LangChain,
+                PdfTable) that are not dependencies of this project.
+              */}
               {[
-                { model: 'XGBoost', badge: 'Scoring Engine', desc: 'Gradient-boosted trees trained on CIBIL + RBI NPA datasets. Achieves AUC 0.91 on Indian SME default prediction.', papers: '3 papers' },
-                { model: 'SHAP', badge: 'Explainability', desc: 'SHapley Additive exPlanations provide regulator-grade reasoning for every credit decision, legally defensible under RBI guidelines.', papers: '2 papers' },
-                { model: 'FinBERT', badge: 'NLP / Sentiment', desc: 'Domain-adapted BERT model for financial news. Fine-tuned on Indian market corpus to detect promoter risk signals.', papers: '4 papers' },
-                { model: 'LangChain', badge: 'RAG Pipeline', desc: '4-level RAG framework: raw financials + risk signals + sector benchmarks + RBI regulatory context fed to Cohere.', papers: '2 papers' },
-                { model: 'PdfTable', badge: 'Document AI', desc: 'Extracts structured financial tables from scanned PDFs without ML, enabling zero-shot document understanding.', papers: '1 paper' },
-                { model: 'ChromaDB', badge: 'Vector Memory', desc: 'Stores sector benchmark embeddings and historical NPA case studies for real-time RAG retrieval during analysis.', papers: '1 paper' },
-              ].map(({ model, badge, desc, papers }) => (
+                {
+                  model: 'XGBoost',
+                  badge: 'Scoring Engine',
+                  desc: 'Gradient-boosted trees over 12 financial ratios read from the applicant’s own statements. Trained on the UCI "Polish companies bankruptcy" dataset (10,503 firms), isotonic-calibrated so the output reads as a probability.',
+                  detail: 'Held-out ROC-AUC 0.89 · KS 0.60',
+                },
+                {
+                  model: 'SHAP',
+                  badge: 'Explainability',
+                  desc: 'TreeExplainer attributes each decision to the ratios that drove it, reported in PD percentage points, with a waterfall chart saved per analysis.',
+                  detail: 'shap.TreeExplainer',
+                },
+                {
+                  model: 'FinBERT',
+                  badge: 'NLP / Sentiment',
+                  desc: 'The published finbert-tone checkpoint, used as released with no further fine-tuning. Its negative-tone score is blended 40/60 with a hand-written India credit-risk phrase dictionary.',
+                  detail: 'yiyanghkust/finbert-tone',
+                },
+                {
+                  model: 'Cohere',
+                  badge: 'Memo Drafting',
+                  desc: 'The credit appraisal memo is written section by section from a four-level context: extracted statement lines, risk signals, sector benchmarks and RBI guidance.',
+                  detail: 'command-r',
+                },
+                {
+                  model: 'OCR',
+                  badge: 'Document AI',
+                  desc: 'pdfplumber and PyMuPDF for digital PDFs, Tesseract or AWS Textract for scans. Statement lines are matched by label with a confidence score per field; a line that is not found is reported as not extracted.',
+                  detail: '16 statement lines · pdfplumber, PyMuPDF, Tesseract',
+                },
+                {
+                  model: 'ChromaDB',
+                  badge: 'Vector Memory',
+                  desc: 'Scored news articles are embedded and stored per company, then retrieved by similarity when the memo needs the coverage behind a signal.',
+                  detail: 'all-MiniLM-L6-v2 embeddings',
+                },
+              ].map(({ model, badge, desc, detail }) => (
                 <motion.div
                   key={model}
                   className="creditiq-research-card"
@@ -202,7 +247,7 @@ function Home() {
                   </div>
                   <p className="creditiq-research-card__desc">{desc}</p>
                   <div className="creditiq-research-card__papers">
-                    <BookOpen size={12} /> {papers}
+                    <BookOpen size={12} /> {detail}
                   </div>
                 </motion.div>
               ))}
@@ -229,7 +274,7 @@ function Home() {
               viewport={{ once: true }}
               transition={{ duration: 0.6, delay: 0.1 }}
             >
-              {['PdfTable', 'XGBoost', 'SHAP', 'LangChain', 'FinBERT', 'Cohere', 'ChromaDB'].map(t => (
+              {['pdfplumber', 'Tesseract', 'XGBoost', 'SHAP', 'FinBERT', 'Cohere', 'ChromaDB'].map(t => (
                 <motion.div
                   key={t}
                   className="creditiq-powered__logo"

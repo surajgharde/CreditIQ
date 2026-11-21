@@ -311,14 +311,82 @@ same update indefinitely.
 Replies carry a prototype disclaimer, and any analysis whose data quality score
 is zero is flagged as resting on fallback constants rather than real statements.
 
-### Pre-trained models
+### The credit model
 
-`backend/models/xgboost/` ships pre-trained `.pkl` models so a fresh clone can
-score without credentials. These six files are currently **identical copies of
-one base model** — per-sector differentiation is not yet real, despite the
-filenames. Re-training from the Kaggle *Home Credit Default Risk* dataset
-(which requires `KAGGLE_USERNAME` / `KAGGLE_KEY`) is only triggered if
-`xgboost_creditiq_model.pkl` is missing.
+One model: `backend/models/xgboost/creditiq_pd_xgboost.pkl`, trained by
+`backend/train_model.py`.
+
+**Data.** The [UCI "Polish companies bankruptcy
+data"](https://archive.ics.uci.edu/dataset/365) set — 10,503 manufacturing
+companies, 64 reported financial ratios each, labelled with whether the company
+entered bankruptcy inside the forecast period (Zieba, Tomczak & Tomczak, 2016).
+The five files are five forecast horizons and all five are pooled, so the label
+is "entered bankruptcy within the forecast horizon", not a calendar twelve-month
+PD. The trainer downloads it on first run; no credentials are needed.
+
+**Features.** Twelve firm-level ratios, defined in
+`backend/services/credit_features.py` and computed from the borrower's own
+balance sheet, P&L and cash flow statement:
+
+| Feature | Definition | Source attribute |
+| --- | --- | --- |
+| `current_ratio` | Current assets / current liabilities | Attr4 |
+| `quick_ratio` | (Current assets − inventory) / current liabilities | Attr46 |
+| `debt_to_assets` | Total liabilities / total assets | Attr2 |
+| `debt_to_equity` | Total liabilities / equity | Attr2 / Attr10 |
+| `interest_coverage` | EBIT / interest expense | Attr27 |
+| `gross_margin_percent` | Gross profit / revenue | Attr19 |
+| `ebitda_margin_percent` | EBITDA / revenue | Attr49 |
+| `net_margin_percent` | Net profit / revenue | Attr23 |
+| `return_on_assets_percent` | Net profit / total assets | Attr1 |
+| `asset_turnover` | Revenue / total assets | Attr9 |
+| `working_capital_to_assets` | Working capital / total assets | Attr3 |
+| `cash_flow_to_debt` | Cash flow from operations / total liabilities | Attr26 |
+
+A ratio whose statement line could not be read is passed to XGBoost as NaN and
+listed in the API response under `features_not_extracted`. It is never replaced
+with a default value.
+
+**Training.** Stratified 64 / 16 / 20 train / validation / test split.
+`scale_pos_weight` = negatives / positives (≈19.8) for the ~4.8% default rate.
+Early stopping watches the validation slice, never the test set. Because
+`scale_pos_weight` inflates `predict_proba` above the real default frequency, an
+isotonic regression fitted on the validation slice maps the score back onto
+observed frequencies; the PD quoted downstream is that calibrated value.
+
+**Measured on the held-out 20%** (written to
+`backend/models/xgboost/metrics.json` by every training run):
+
+| Metric | Value |
+| --- | --- |
+| ROC-AUC | **0.888** |
+| KS | **0.602** |
+| Average precision | 0.459 |
+| Brier (calibrated) | 0.033 |
+| Brier (uncalibrated) | 0.112 |
+| Test set | 8,681 companies, 418 defaults (4.82%) |
+
+Per forecast horizon, held out: ROC-AUC 0.919 (1 year), 0.878 (2), 0.886 (3),
+0.877 (4), 0.887 (5).
+
+**What the model does not score.** Fraud risk and adverse-media risk are not
+features: there is no labelled dataset here to train them on. They enter the
+risk premium and the decision band through the stated rules in
+`backend/services/scoring_service.py`, and the API response breaks out both.
+
+To retrain:
+
+```bash
+cd backend
+python train_model.py          # downloads the dataset, trains, writes metrics.json
+python train_model.py --no-save  # evaluate without overwriting the model
+```
+
+Earlier versions of this project trained on the Kaggle *Home Credit Default
+Risk* dataset — consumer loan applicants, not firms — with each corporate ratio
+mapped onto a renamed consumer field, and shipped six identically-copied
+"per-sector" model files. Both are gone; `KAGGLE_USERNAME` / `KAGGLE_KEY` are no
+longer used anywhere.
 
 ---
 
@@ -340,10 +408,12 @@ cp backend/.env.example backend/.env
 | `TELEGRAM_BOT_TOKEN` | Telegram bot | From @BotFather. Without it the bot is inert and `/api/telegram/*` returns 503. |
 | `TELEGRAM_ALLOWED_CHAT_IDS` | Telegram operator chats | Comma-separated numeric chat IDs that see every company. Company-scoped access is granted in the Profile page instead, not here. |
 | `TELEGRAM_WEBHOOK_SECRET` | Telegram webhook | Required when using the webhook rather than the poller. |
-| `JWT_SECRET` | Auth tokens | Any long random string. |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Signing in | No defaults. With either unset there is no admin account at all. |
+| `JWT_SECRET` | Auth tokens | Any long random string. Unset, a random one is generated per process, so tokens stop working on restart. |
+| `CORS_ORIGINS` | Browser access | Comma-separated origins. Defaults to `http://localhost:5173,http://127.0.0.1:5173`. |
+| `CREDITIQ_DEMO_MODE` | Walkthroughs without API credentials | `true` lets the fraud checks run on generated data. Every generated signal is marked SYNTHETIC in the API, the dashboard and the memo. Off by default. |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Scanned-PDF OCR | Falls back to Tesseract when absent. |
-| `NEWS_API_KEY` | Adverse-media retrieval | News risk degrades to a neutral score without it. |
-| `KAGGLE_USERNAME` / `KAGGLE_KEY` | Re-training only | Not needed; trained models are committed. |
+| `NEWS_API_KEY` | Adverse-media retrieval | Without it only Google News RSS and the two scrapers are tried; if all come back empty the check reports no coverage found. |
 | `GSTN_*`, `MCA_*`, `TWILIO_*`, `SENDGRID_*`, `REDIS_URL` | Optional integrations | Each degrades gracefully. |
 
 ---
@@ -395,12 +465,30 @@ python start_backend.py          # either platform
 bash start_frontend.sh           # macOS/Linux
 ```
 
-### Default login
+### Login
 
-The prototype seeds a single administrator account on first run. The
-credentials are defined in `backend/routers/auth.py` — **change them before
-exposing this anywhere**, and replace the hardcoded check with real user
-storage before any non-local deployment.
+There is one administrator account and it has no default credentials. Set both
+of these in `backend/.env`, or there is no admin account and only rows in the
+`users` table can authenticate:
+
+```ini
+ADMIN_EMAIL=you@example.com
+ADMIN_PASSWORD=<a long random string>
+```
+
+Every endpoint that touches borrower data requires the bearer token returned by
+`POST /api/auth/login`: upload, analyze, results, fraud, CAM, EWS, history,
+drafts, chat and profile, plus the three WebSocket streams, which take the same
+token as a `?token=` query parameter because a handshake cannot carry an
+Authorization header. Only `GET /`, `GET /health`, `POST /api/auth/login` and
+the Telegram webhook (which authenticates with `TELEGRAM_WEBHOOK_SECRET`) are
+reachable unauthenticated.
+
+`CORS_ORIGINS` lists the browser origins allowed to call the API, defaulting to
+the Vite dev server. Set it to your deployed frontend's URL in production.
+
+Replace the single-admin check with real user storage before any multi-user
+deployment.
 
 ---
 

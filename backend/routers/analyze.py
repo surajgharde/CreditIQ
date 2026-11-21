@@ -33,8 +33,6 @@ async def ws_push(analysis_id: int, step_no: int, name: str, detail: str, pct: i
         "timestamp": datetime.now().isoformat()
     }
     await manager.send_personal_message(msg, str(analysis_id))
-    # Artificial small delay to visually show the AI doing work for the hackathon judges
-    await asyncio.sleep(1.2)
 
 async def run_analysis_background(analysis_id: int):
     # This runs in background using a separate DB session
@@ -96,12 +94,16 @@ async def run_analysis_background(analysis_id: int):
         await ws_push(analysis_id, 3, "Fraud Detection Engine", "Checking GST mismatch GSTR-2A vs GSTR-3B", 40, "running")
         
         # Pass OCR results to fraud service so it can bypass APIs if data was already extracted from PDFs
+        # No DINs: the application form does not collect them, so the director
+        # cross-entity check reports itself as not run. Two hardcoded DINs used
+        # to be passed here, which made every borrower's memo carry the same
+        # two directors' screening result.
         fraud_res = await asyncio.to_thread(
-            fraud_service.run_fraud_detection, 
-            company.gstin_number, 
+            fraud_service.run_fraud_detection,
+            company.gstin_number,
             company.cin_number,
-            dins=["02930211", "07882291"], # Hackathon placeholder DINS for scanning checks
-            gst_data=ocr_res.get("gst_records"), 
+            dins=None,
+            gst_data=ocr_res.get("gst_records"),
             trx_data=ocr_res.get("transaction_ledgers"),
             ocr_revenue=ocr_res.get("revenue_fy24", company.loan_amount_requested * 2.0)
         )
@@ -109,7 +111,7 @@ async def run_analysis_background(analysis_id: int):
         if "error" in fraud_res:
              raise Exception(f"Fraud Detection Engine Failed: {fraud_res['error']}")
              
-        analysis.fraud_risk_level = fraud_res.get("fraud_risk_level", "LOW")
+        analysis.fraud_risk_level = fraud_res.get("fraud_risk_level", "UNKNOWN")
         signals = fraud_res.get("signals", [])
         for sig in signals:
             db.add(FraudSignal(
@@ -148,7 +150,7 @@ async def run_analysis_background(analysis_id: int):
         score_res = await asyncio.to_thread(
             scoring_service.calculate_credit_score,
             ocr_res,
-            analysis.fraud_risk_level or "LOW",
+            analysis.fraud_risk_level or "UNKNOWN",
             analysis.news_risk_score or 0.0,
             company.loan_amount_requested or 0.0
         )
@@ -165,7 +167,7 @@ async def run_analysis_background(analysis_id: int):
         await ws_push(analysis_id, 5, "XGBoost + SHAP Credit Scoring", f"Decision: {analysis.decision} · PD: {analysis.probability_of_default:.1f}% · Rate: {analysis.recommended_interest_rate:.1f}%", 80, "completed")
 
         # Step 6: CAM
-        await ws_push(analysis_id, 6, "Claude AI CAM Generation", "Drafting Credit Appraisal Memo", 90, "running")
+        await ws_push(analysis_id, 6, "Cohere CAM Generation", "Drafting Credit Appraisal Memo", 90, "running")
         analysis_data = {
             "company": {
                 "company_name": company.company_name,
@@ -182,11 +184,19 @@ async def run_analysis_background(analysis_id: int):
             },
             "fraud": {
                 "overall_fraud_risk": analysis.fraud_risk_level,
-                "signals": fraud_res.get("signals", [])
+                "signals": fraud_res.get("signals", []),
+                "checks_run": fraud_res.get("checks_run"),
+                "checks_total": fraud_res.get("checks_total"),
+                # Carried into the memo so a generated signal is never written up
+                # as a real finding.
+                "contains_synthetic_signals": fraud_res.get("fraud_data_synthetic", False),
+                "synthetic_signal_types": fraud_res.get("synthetic_signal_types", []),
             },
             "news": {
                 "news_risk_score": analysis.news_risk_score,
-                "top_signals": news_res.get("signals", [])
+                "top_signals": news_res.get("signals", []),
+                "news_data_available": news_res.get("news_data_available", True),
+                "coverage_note": news_res.get("note"),
             },
             "shap": {
                 "shap_factors": score_res.get("shap_factors", []),
@@ -199,7 +209,7 @@ async def run_analysis_background(analysis_id: int):
         }
         cam_res = await asyncio.to_thread(cam_service.generate_cam, analysis_data)
         if not cam_res.get("success"):
-             raise Exception(f"Claude AI Document Synthesis Failed: {cam_res.get('error', 'Unknown Error')}")
+             raise Exception(f"Cohere document synthesis failed: {cam_res.get('error', 'Unknown Error')}")
              
         analysis.cam_document_path = cam_res.get("pdf_document_path", "")
         analysis.cam_pdf_path = cam_res.get("pdf_document_path", "")
@@ -215,22 +225,49 @@ async def run_analysis_background(analysis_id: int):
             actual_conditions.append("Require additional 20% collateral in liquid assets")
         if analysis.fraud_risk_level in ["MEDIUM", "HIGH"]:
             actual_conditions.append("Mandatory quarterly audit and risk reassessment")
+        if analysis.fraud_risk_level == "UNKNOWN":
+            actual_conditions.append(
+                "Complete the outstanding fraud checks: GST returns, transaction "
+                "ledger and director DINs were not available to screen"
+            )
+        if score_res.get("features_not_extracted"):
+            actual_conditions.append(
+                "Supply the statements for the ratios that could not be read: "
+                + ", ".join(score_res["features_not_extracted"])
+            )
         if company.loan_amount_requested > 10000000:
             actual_conditions.append("Promoter personal guarantee required")
-            
+
+        breakdown = score_res.get("interest_rate_breakdown", {})
         dashboard_results = {
             "shap": {
                 "shap_chart_url": f"/api/shap-chart/{analysis.id}",
                 "shap_factors": score_res.get("shap_factors", []),
-                "base_risk": score_res.get("base_risk", 16.0),
-                "final_pd": analysis.probability_of_default
+                "base_risk": score_res.get("base_risk"),
+                "final_pd": analysis.probability_of_default,
+                "note": score_res.get("shap_note"),
             },
             "news_signals": news_res.get("signals", []),
+            "news_data_available": news_res.get("news_data_available", True),
+            "fraud_data_synthetic": fraud_res.get("fraud_data_synthetic", False),
+            "model": score_res.get("model", {}),
+            "features_not_extracted": score_res.get("features_not_extracted", []),
+            "feature_completeness_percent": score_res.get("feature_completeness_percent"),
             "recommendation": {
                 "decision_reasoning": score_res.get("decision_reasoning", "Analysis complete."),
+                "decision_reasons": score_res.get("decision_reasons", []),
                 "conditions": actual_conditions,
-                "loan_tenure": 3,
-                "interest_rate_breakdown": f"{6.5}% Base Rate + {analysis.recommended_interest_rate - 6.5:.1f}% Risk Premium"
+                "loan_tenure": 5,
+                "recommended_loan_basis": score_res.get("recommended_loan_basis"),
+                "interest_rate_breakdown": (
+                    f"{breakdown.get('repo_rate_percent', 6.5)}% repo rate"
+                    f" + {breakdown.get('credit_spread_percent', 0)}% credit spread"
+                    + (f" + {breakdown['fraud_premium_percent']}% fraud premium"
+                       if breakdown.get("fraud_premium_percent") else "")
+                    + (f" + {breakdown['adverse_media_premium_percent']}% adverse-media premium"
+                       if breakdown.get("adverse_media_premium_percent") else "")
+                    + f" = {breakdown.get('total_percent', analysis.recommended_interest_rate)}%"
+                ),
             }
         }
         with open(f"data/results_{analysis.id}.json", "w") as f:
@@ -241,7 +278,7 @@ async def run_analysis_background(analysis_id: int):
         analysis.analysis_status = "completed"
         company.status = "analyzed"
         db.commit()
-        await ws_push(analysis_id, 6, "Claude AI CAM Generation", "CAM parameters synced successfully", 100, "completed")
+        await ws_push(analysis_id, 6, "Cohere CAM Generation", "CAM parameters synced successfully", 100, "completed")
 
     except Exception as e:
         # Capture full repr(e) for better debugging

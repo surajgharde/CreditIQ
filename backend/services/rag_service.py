@@ -257,8 +257,8 @@ async def scrape_economic_times(session, query: str) -> List[Dict[str, Any]]:
     return results
 
 
-async def run_all_scrapers(company_name: str, promoter_names: List[str] = None) -> List[Dict[str, Any]]:
-    """6 query variations run in parallel across multiple sources."""
+def build_queries(company_name: str, promoter_names: List[str] = None) -> List[str]:
+    """The query variations tried for one company, in order."""
     promoters = promoter_names or []
 
     # Strip common suffixes for shorter query
@@ -275,8 +275,13 @@ async def run_all_scrapers(company_name: str, promoter_names: List[str] = None) 
         f"{short_name} India",               # Q3 + India
         f"{short_name} fraud NBFC",          # Q4 risk context
     ]
-    for p in promoters[:2]:
-        queries.append(p)                    # Q5,Q6 promoter names
+    queries.extend(promoters[:2])            # Q5,Q6 promoter names
+    return queries
+
+
+async def run_all_scrapers(company_name: str, promoter_names: List[str] = None) -> List[Dict[str, Any]]:
+    """Every query variation run across every source."""
+    queries = build_queries(company_name, promoter_names)
 
     all_articles: List[Dict[str, Any]] = []
     seen_titles = set()
@@ -314,37 +319,39 @@ async def run_all_scrapers(company_name: str, promoter_names: List[str] = None) 
 
 
 # ──────────────────────────────────────────────────────
-# PROCEDURAL FALLBACK (only when all scraping fails)
+# NO COVERAGE FOUND
 # ──────────────────────────────────────────────────────
-def _generate_fallback_articles(company_name: str) -> List[Dict[str, Any]]:
-    """Deterministic from company name hash — never 0/100."""
-    import random
-    generator = random.Random(int(hashlib.md5(company_name.encode()).hexdigest(), 16))
-    events = [
-        ("Q3 Results missed street estimates, margins under pressure",
-         f"Financial performance for {company_name} showed slight EBITDA deterioration."),
-        (f"{company_name} wins large PSU contract — analyst upgrade",
-         "Strong forward guidance issued; revenue target revised upward."),
-        (f"CFO exits {company_name} amid internal restructuring",
-         "Top-level management changes bring interim uncertainty to operations."),
-        (f"{company_name} receives minor environmental notice from CPCB",
-         "Company responds within statutory timeline; no impact on operations expected."),
-        (f"NSE flags {company_name} for disclosure delay",
-         "Stock exchange issued procedural query on quarterly filing timeline."),
-        (f"{company_name} promoter entity forges ahead with capacity expansion",
-         "New manufacturing line expected to add 30% output by Q2 FY25."),
-    ]
-    selected = generator.sample(events, min(4, len(events)))
-    return [
-        {
-            "source": generator.choice(["MoneyControl", "Economic Times", "Livemint", "Business Standard"]),
-            "title": title,
-            "summary": summary,
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "text": title + " " + summary,
-        }
-        for title, summary in selected
-    ]
+# There is deliberately no fallback article generator here. The previous one
+# invented headlines about the named company when every scraper came back empty
+# — "CFO exits <company> amid internal restructuring", "NSE flags <company> for
+# disclosure delay" — and those strings then appeared in the credit memo as
+# adverse media, attributed to Economic Times or MoneyControl, with a risk score
+# derived from them. A headline about a real, named company must never be
+# synthesised. When nothing is found, nothing is reported.
+NO_COVERAGE_NOTE = (
+    "No news coverage was found for this company. Every source returned empty: "
+    "Google News RSS, NewsAPI (if a key is configured), MoneyControl and "
+    "Economic Times. This is an absence of evidence, not evidence of good "
+    "standing — a company with no media footprint scores the same as one with "
+    "clean coverage, and the adverse-media check should be treated as not "
+    "performed."
+)
+
+
+def _no_coverage_result(company_name: str, queries_tried: int) -> Dict[str, Any]:
+    """The honest empty result: a neutral score and a statement that it is empty."""
+    logger.warning("No news coverage found for '%s' across %d queries", company_name, queries_tried)
+    return {
+        "news_risk_score": 0.0,
+        "signals": [],
+        "total_articles_scanned": 0,
+        "articles_scored": 0,
+        "news_data_available": False,
+        "note": NO_COVERAGE_NOTE,
+        "date_range": "Last 90 Days",
+        "sources_used": [],
+        "query_variations_tried": queries_tried,
+    }
 
 
 # ──────────────────────────────────────────────────────
@@ -356,7 +363,9 @@ from services.external_apis import cache_get, cache_set
 def get_news_intelligence(company_name: str, gstin: str) -> Dict[str, Any]:
     """
     MASTER PIPELINE: Scrape → Score → Vectorise → Return
-    Never returns 0/100 silently.
+
+    A score of 0 with `news_data_available: False` means no coverage was found.
+    That is reported as such; no article is ever invented to fill the gap.
     """
     cache_key = f"news_rag_{hashlib.md5(company_name.encode()).hexdigest()}"
     cached = cache_get(cache_key)
@@ -371,12 +380,11 @@ def get_news_intelligence(company_name: str, gstin: str) -> Dict[str, Any]:
         logger.error(f"Scraper gather failed: {e}")
         raw_articles = []
 
-    # 2. Fallback if nothing found
-    fallback_used = False
+    # 2. Nothing found: say so, with a neutral score, and stop.
     if not raw_articles:
-        logger.warning(f"All scrapers returned 0 results for '{company_name}'. Using procedural fallback.")
-        raw_articles = _generate_fallback_articles(company_name)
-        fallback_used = True
+        empty = _no_coverage_result(company_name, len(build_queries(company_name)))
+        cache_set(cache_key, empty, 15 * 60)  # short cache: coverage may appear
+        return empty
 
     # 3. Score every article
     processed: List[Dict[str, Any]] = []
@@ -408,7 +416,7 @@ def get_news_intelligence(company_name: str, gstin: str) -> Dict[str, Any]:
     overall_score = round(total_score / len(processed), 1) if processed else 0.0
     logger.info(
         f"News intelligence for '{company_name}': {len(processed)} articles, "
-        f"overall_score={overall_score}, fallback={fallback_used}"
+        f"overall_score={overall_score}"
     )
 
     # 5. ChromaDB vectorisation (failure never skips article)
@@ -446,11 +454,59 @@ def get_news_intelligence(company_name: str, gstin: str) -> Dict[str, Any]:
         "signals": signals_output,
         "total_articles_scanned": len(raw_articles),
         "articles_scored": len(processed),
-        "fallback_used": fallback_used,
+        "news_data_available": True,
         "date_range": "Last 90 Days",
         "sources_used": list({a["source"] for a in processed}),
-        "query_variations_tried": 6,
+        "query_variations_tried": len(build_queries(company_name)),
     }
 
     cache_set(cache_key, result, 2 * 3600)  # 2-hour cache (was 6h)
     return result
+
+
+# ──────────────────────────────────────────────────────
+# CHROMADB RETRIEVAL
+# ──────────────────────────────────────────────────────
+def query_news_context(company_name: str, question: str, n_results: int = 4) -> Dict[str, Any]:
+    """
+    Retrieve the stored coverage most similar to `question` for one company.
+
+    This is the vector search the collection was being populated for. It
+    replaces a function in scoring_service that returned three hardcoded
+    constants — among them a flat +12.5 added to every company's news score —
+    under a comment saying it "mocks the LangChain execution against ChromaDB".
+
+    Returns the retrieved documents, or an explicit unavailable/empty result.
+    Nothing here modifies any score.
+    """
+    if collection is None:
+        return {"available": False, "reason": "ChromaDB is not available in this process", "documents": []}
+
+    try:
+        hits = collection.query(
+            query_texts=[question],
+            n_results=n_results,
+            where={"company": company_name},
+        )
+    except Exception as exc:
+        logger.warning("ChromaDB query failed for '%s': %s", company_name, exc)
+        return {"available": False, "reason": f"query failed: {exc}", "documents": []}
+
+    documents = (hits.get("documents") or [[]])[0]
+    metadatas = (hits.get("metadatas") or [[]])[0]
+    distances = (hits.get("distances") or [[]])[0]
+
+    return {
+        "available": True,
+        "query": question,
+        "documents": [
+            {
+                "text": text,
+                "source": (meta or {}).get("source"),
+                "date": (meta or {}).get("date"),
+                "risk_score": (meta or {}).get("risk_score"),
+                "distance": round(float(distance), 4) if distance is not None else None,
+            }
+            for text, meta, distance in zip(documents, metadatas, distances)
+        ],
+    }

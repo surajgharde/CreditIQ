@@ -6,6 +6,7 @@ import {
   AlertTriangle, ShieldCheck, Banknote,
 } from 'lucide-react';
 import { getCAMPreview, generateCAM, downloadCAM } from '../services/camApi';
+import { wsUrlWithToken } from '../services/apiConfig';
 import { useApi, Skeleton, ErrorBanner } from '../services/useApi';
 import './CamSuccess.css';
 
@@ -130,7 +131,7 @@ function CamSuccess() {
     setGenDetail('Connecting to Cohere AI engine...');
 
     /* WS progress */
-    const ws = new WebSocket(`ws://localhost:8000/ws/analysis/${analysisId}`);
+    const ws = new WebSocket(wsUrlWithToken(`/ws/analysis/${analysisId}`));
     wsRef.current = ws;
     ws.onmessage = (e) => {
       try {

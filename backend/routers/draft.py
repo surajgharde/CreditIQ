@@ -1,15 +1,17 @@
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from database import get_db
 from models.draft import FormDraft
 from pydantic import BaseModel
 
+from routers.auth import get_current_user
+
 router = APIRouter(prefix="/api/analysis", tags=["Drafts"])
 
-def get_current_user_email(x_user_email: str = Header(None)):
-    if x_user_email:
-        return x_user_email
-    return "admin@gmail.com" # default fallback
+# The draft is keyed by user, so the identity must come from the bearer token.
+# This used to read an X-User-Email header and fall back to admin@gmail.com,
+# which let any caller read or overwrite any user's draft by naming them.
+get_current_user_email = get_current_user
 
 class DraftCreate(BaseModel):
     company_name: str
