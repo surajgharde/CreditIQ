@@ -383,11 +383,11 @@ def clean_indian_numbers(text: str) -> str:
         except Exception:
             return m.group(0)
 
-    # Rs, INR, ru symbols to standard. The leading  matters: without it the
+    # Rs, INR, ru symbols to standard. The leading \b matters: without it the
     # "rs" inside ordinary words is treated as a currency token, so
     # "Shareholders Funds" became "Shareholde₹ Funds" and the label stopped
     # matching. The same applied to creditors, debtors, directors, borrowers.
-    text = re.sub(r'(Rs\.?|INR|रु)\s*', '₹', text, flags=re.IGNORECASE)
+    text = re.sub(r'\b(Rs\.?|INR|रु)\s*', '₹', text, flags=re.IGNORECASE)
     
     # 1,00,00,000 -> 10000000
     cleaned = re.sub(r'(?<=\d),(?=\d)', '', text)
@@ -492,12 +492,12 @@ def find_financial_indicators(text: str) -> Dict[str, Any]:
     # Longer multi-word phrases are matched as substrings, which is safe.
     def matches(line: str, pattern: str) -> bool:
         if len(pattern) <= 5 and " " not in pattern:
-            return re.search(r'' + re.escape(pattern) + r'', line) is not None
+            return re.search(r'\b' + re.escape(pattern) + r'\b', line) is not None
         # "current assets" and "current liabilities" are substrings of their own
         # "non-current" counterparts, so a plain test matches the wrong section
         # header and reads its section number as the amount.
         if pattern.startswith("current "):
-            return re.search(r'(?<!non-)(?<!non )' + re.escape(pattern), line) is not None
+            return re.search(r'(?<!non-)(?<!non )\b' + re.escape(pattern), line) is not None
         # Likewise "total equity" appears inside the balancing total "TOTAL
         # EQUITY AND LIABILITIES", which is the whole balance sheet rather than
         # shareholders' funds — matching it overstates net worth badly.
